@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ms2-os-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: ms2-os-service
+  template:
+    metadata:
+      labels:
+        app: ms2-os-service
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/lukasqw/oficina-tech-ms2-os-service:latest
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef:
+                name: ms2-os-service-config
+            - secretRef:
+                name: ms2-os-service-secret
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8082
+            initialDelaySeconds: 15
+            periodSeconds: 20

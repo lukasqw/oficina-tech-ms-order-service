@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ms2-os-service-config
+data:
+  PORT: "8082"
+  DB_HOST: "postgres-ms2"
+  DB_PORT: "5432"
+  DB_NAME: "db_ms2"
+  DB_SSLMODE: "disable"
+  MS1_BASE_URL: "http://ms1-service:8081"
+  MS3_BASE_URL: "http://ms3-service:8083"
+  MP_NOTIFICATION_URL: "https://api.oficina-tech.com/payments/mp-webhook"
+  AWS_DEFAULT_REGION: "us-east-1"

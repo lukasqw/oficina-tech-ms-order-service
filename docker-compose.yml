@@ -1,0 +1,69 @@
+services:
+  ms2-os-service:
+    build: .
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: "8082"
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: oficina
+      DB_PASSWORD: oficina
+      DB_NAME: db_ms2
+      DB_SSLMODE: disable
+      JWT_SECRET_KEY: local-dev-secret
+      # Nomes dos serviços quando rodando pelo compose raiz (../docker-compose.yml)
+      # Para rodar só o MS2 isolado, troque por localhost:8081 / localhost:8083
+      MS1_BASE_URL: http://ms1:8081
+      MS3_BASE_URL: http://ms3:8083
+      MP_ACCESS_TOKEN: dev-token
+      MP_WEBHOOK_SECRET: dev-webhook-secret
+      MP_NOTIFICATION_URL: http://localhost:8082/payments/mp-webhook
+      AWS_ENDPOINT_URL: http://localstack:4566
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5434:5432"
+    environment:
+      POSTGRES_USER: oficina
+      POSTGRES_PASSWORD: oficina
+      POSTGRES_DB: db_ms2
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./migrations:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oficina -d db_ms2"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs,sns,dynamodb
+      AWS_DEFAULT_REGION: us-east-1
+      DEBUG: "0"
+    volumes:
+      - localstack-data:/var/lib/localstack
+      - ./scripts/init-localstack.sh:/etc/localstack/init/ready.d/init-localstack.sh:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  postgres-data:
+  localstack-data:

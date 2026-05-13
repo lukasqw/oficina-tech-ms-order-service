@@ -1,0 +1,159 @@
+services:
+  postgres-ms1:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: db_ms1
+      POSTGRES_USER: oficina
+      POSTGRES_PASSWORD: oficina
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oficina -d db_ms1"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5433:5432"
+
+  postgres-ms2:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: db_ms2
+      POSTGRES_USER: oficina
+      POSTGRES_PASSWORD: oficina
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oficina -d db_ms2"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5434:5432"
+
+  postgres-ms3:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: db_ms3
+      POSTGRES_USER: oficina
+      POSTGRES_PASSWORD: oficina
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oficina -d db_ms3"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    ports:
+      - "5435:5432"
+
+  localstack:
+    image: localstack/localstack:3
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs,sns,dynamodb
+      AWS_DEFAULT_REGION: us-east-1
+      DEBUG: "0"
+    volumes:
+      - ./scripts/init-localstack.sh:/etc/localstack/init/ready.d/init-localstack.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "awslocal sqs list-queues | grep -q order-inventory-op-requested"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+
+  mp-mock:
+    build:
+      context: ./bdd/mockmp
+    ports:
+      - "9999:9999"
+    environment:
+      MOCK_MP_ADDR: ":9999"
+
+  ms1-service:
+    build: ../oficina-tech-ms1-identity-client
+    ports:
+      - "8081:8081"
+    environment:
+      SERVER_PORT: "8081"
+      DB_HOST: postgres-ms1
+      DB_PORT: "5432"
+      DB_USER: oficina
+      DB_PASSWORD: oficina
+      DB_NAME: db_ms1
+      DB_SSLMODE: disable
+      JWT_SECRET_KEY: e2e-secret
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+      CUSTOMER_DELETED_QUEUE_URL: http://localstack:4566/000000000000/customer-deleted
+      BOOTSTRAP_ADMIN_EMAIL: admin@oficina.test
+      BOOTSTRAP_ADMIN_PASSWORD: admin1234
+      BOOTSTRAP_ADMIN_CPF: "11122233344"
+    depends_on:
+      postgres-ms1:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  ms3-service:
+    build: ../oficina-tech-ms3-workshop
+    ports:
+      - "8083:8083"
+    environment:
+      SERVER_PORT: "8083"
+      DB_HOST: postgres-ms3
+      DB_PORT: "5432"
+      DB_USER: oficina
+      DB_PASSWORD: oficina
+      DB_NAME: db_ms3
+      DB_SSLMODE: disable
+      JWT_SECRET_KEY: e2e-secret
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+    depends_on:
+      postgres-ms3:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  ms2-service:
+    build: .
+    ports:
+      - "8082:8082"
+    environment:
+      PORT: "8082"
+      DB_HOST: postgres-ms2
+      DB_PORT: "5432"
+      DB_USER: oficina
+      DB_PASSWORD: oficina
+      DB_NAME: db_ms2
+      DB_SSLMODE: disable
+      JWT_SECRET_KEY: e2e-secret
+      MS1_BASE_URL: http://ms1-service:8081
+      MS3_BASE_URL: http://ms3-service:8083
+      MP_BASE_URL: http://mp-mock:9999
+      MP_ACCESS_TOKEN: e2e-token
+      MP_WEBHOOK_SECRET: e2e-webhook-secret
+      MP_NOTIFICATION_URL: http://ms2-service:8082/payments/mp-webhook
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+      DYNAMO_TABLE_ORDER_HISTORY: order_history
+      SMTP_HOST: ""
+      SMTP_PORT: ""
+    depends_on:
+      postgres-ms2:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+      ms1-service:
+        condition: service_started
+      ms3-service:
+        condition: service_started
+      mp-mock:
+        condition: service_started
+
+networks:
+  default:
+    name: oficina-tech-e2e
