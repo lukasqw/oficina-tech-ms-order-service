@@ -1,18 +1,55 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    branches: [ develop, main ]
+  push:
+    branches: [ develop ]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  test:
+  lint-test:
+    name: Lint, Vet & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
-          go-version: "1.25"
+          go-version: ${{ vars.GO_VERSION || '1.25' }}
           cache: true
-      - run: go test ./...
-      - run: go build ./...
+
+      - name: Download dependencies
+        run: go mod download
+
+      - name: Go Vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+      - name: Run Unit Tests
+        run: go test ./internal/... -v -coverprofile=coverage.out -covermode=atomic
+
+      - name: Coverage Gate
+        run: |
+          COVERAGE=$(go tool cover -func=coverage.out | awk '/total:/ { sub(/%/, "", $3); print $3 }')
+          echo "Coverage: ${COVERAGE}%"
+          awk -v coverage="$COVERAGE" 'BEGIN { exit !(coverage >= 80.0) }' || \
+            (echo "::error::Coverage ${COVERAGE}% is below the 80% threshold" && exit 1)
+
+      - name: Run BDD Tests
+        run: go test ./bdd/... -v

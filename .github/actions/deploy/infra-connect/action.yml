@@ -1,0 +1,122 @@
+name: 'Deploy — Connect to Infrastructure'
+description: >
+  Configures AWS credentials, reads Terraform state from S3 to discover
+  infrastructure outputs (EKS cluster, RDS, NLB), and configures kubectl
+  to access the EKS cluster.
+
+inputs:
+  aws_access_key_id:
+    description: 'AWS Access Key ID'
+    required: true
+  aws_secret_access_key:
+    description: 'AWS Secret Access Key'
+    required: true
+  aws_session_token:
+    description: 'AWS Session Token'
+    required: true
+  aws_region:
+    description: 'AWS region (e.g. us-east-1)'
+    required: true
+  infra_tfstate_s3_path:
+    description: 'S3 path to the infrastructure Terraform state (e.g. s3://bucket/infra/terraform.tfstate)'
+    required: true
+  db_tfstate_s3_path:
+    description: 'S3 path to the database Terraform state (e.g. s3://bucket/db/terraform.tfstate)'
+    required: true
+  kubectl_version:
+    description: 'kubectl version to install — pin to avoid fetching latest on every run'
+    required: false
+    default: 'v1.31.0'
+
+outputs:
+  cluster_name:
+    description: 'EKS cluster name'
+    value: ${{ steps.infra.outputs.cluster_name }}
+  rds_address:
+    description: 'RDS endpoint address'
+    value: ${{ steps.infra.outputs.rds_address }}
+  rds_port:
+    description: 'RDS port'
+    value: ${{ steps.infra.outputs.rds_port }}
+  rds_dbname:
+    description: 'RDS database name'
+    value: ${{ steps.infra.outputs.rds_dbname }}
+  rds_user:
+    description: 'RDS username'
+    value: ${{ steps.infra.outputs.rds_user }}
+  nlb_dns:
+    description: 'Network Load Balancer DNS name'
+    value: ${{ steps.infra.outputs.nlb_dns }}
+  vpc_id:
+    description: 'VPC ID'
+    value: ${{ steps.infra.outputs.vpc_id }}
+
+runs:
+  using: composite
+  steps:
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ inputs.aws_access_key_id }}
+        aws-secret-access-key: ${{ inputs.aws_secret_access_key }}
+        aws-session-token: ${{ inputs.aws_session_token }}
+        aws-region: ${{ inputs.aws_region }}
+
+    - name: Read Infrastructure Outputs from Terraform State
+      id: infra
+      shell: bash
+      run: |
+        aws s3 cp ${{ inputs.infra_tfstate_s3_path }} /tmp/infra-state.json
+        aws s3 cp ${{ inputs.db_tfstate_s3_path }} /tmp/db-state.json
+
+        CLUSTER_NAME=$(jq -r '.outputs.eks_cluster_name.value // empty' /tmp/infra-state.json)
+        NLB_DNS=$(jq -r '.outputs.nlb_dns_name.value // empty' /tmp/infra-state.json)
+        VPC_ID=$(jq -r '.outputs.vpc_id.value // empty' /tmp/infra-state.json)
+
+        RDS_ADDRESS=$(jq -r '.outputs.rds_address.value // empty' /tmp/db-state.json)
+        RDS_PORT=$(jq -r '.outputs.rds_port.value // "5432"' /tmp/db-state.json)
+        RDS_DBNAME=$(jq -r '.outputs.rds_database_name.value // "oficina_tech"' /tmp/db-state.json)
+        RDS_USER=$(jq -r '.outputs.rds_username.value // "postgres"' /tmp/db-state.json)
+
+        if [ -z "$CLUSTER_NAME" ]; then
+          echo "::error::eks_cluster_name not found in infrastructure state"
+          echo "::error::Ensure the infrastructure project has been applied first"
+          exit 1
+        fi
+
+        if [ -z "$RDS_ADDRESS" ]; then
+          echo "::error::rds_address not found in database state"
+          exit 1
+        fi
+
+        echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+        echo "rds_address=$RDS_ADDRESS" >> $GITHUB_OUTPUT
+        echo "rds_port=$RDS_PORT" >> $GITHUB_OUTPUT
+        echo "rds_dbname=$RDS_DBNAME" >> $GITHUB_OUTPUT
+        echo "rds_user=$RDS_USER" >> $GITHUB_OUTPUT
+        echo "nlb_dns=$NLB_DNS" >> $GITHUB_OUTPUT
+        echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
+
+        echo "::notice::Cluster: $CLUSTER_NAME"
+        echo "::notice::RDS: $RDS_ADDRESS:$RDS_PORT/$RDS_DBNAME"
+        echo "::notice::NLB DNS: $NLB_DNS"
+
+    - name: Setup kubectl
+      uses: azure/setup-kubectl@v3
+      with:
+        version: ${{ inputs.kubectl_version }}
+
+    - name: Configure kubectl for EKS
+      shell: bash
+      run: |
+        aws eks update-kubeconfig \
+          --region ${{ inputs.aws_region }} \
+          --name ${{ steps.infra.outputs.cluster_name }}
+
+        if ! kubectl get nodes 2>/dev/null; then
+          echo "::error::Cannot access EKS cluster — check IAM user is in aws-auth ConfigMap"
+          exit 1
+        fi
+
+        kubectl cluster-info
+        kubectl get nodes

@@ -1,0 +1,73 @@
+name: 'Release — Publish GitHub Release'
+description: >
+  Builds the production binary, generates a changelog from git history since
+  the previous tag, and publishes a GitHub Release with the binary attached.
+  Must run AFTER finalize-release-tag so the tag already exists when
+  softprops/action-gh-release attaches to it.
+
+inputs:
+  version:
+    description: 'Version tag to release (e.g. v1.2.0)'
+    required: true
+  registry:
+    description: 'Container registry hostname (e.g. ghcr.io)'
+    required: true
+  image_name:
+    description: 'Image name including owner (e.g. org/repo)'
+    required: true
+  app_name:
+    description: 'Application name — used as the binary filename (e.g. oficina-tech)'
+    required: true
+  go_version:
+    description: 'Go version to use for building the binary'
+    required: false
+    default: '1.24'
+  go_main_path:
+    description: 'Path to the Go main package entry point'
+    required: false
+    default: 'cmd/api/main.go'
+
+runs:
+  using: composite
+  steps:
+    - name: Download Binary
+      uses: actions/download-artifact@v4
+      with:
+        name: binary-${{ inputs.version }}
+        path: bin/
+
+    # Generates changelog from commits between the previous tag and HEAD.
+    # Falls back to the last 20 commits when no previous tag exists.
+    - name: Generate Changelog
+      id: changelog
+      shell: bash
+      run: |
+        PREV_TAG=$(git describe --tags --sort=-v:refname --abbrev=0 \
+          $(git rev-list --tags --skip=1 --max-count=1) 2>/dev/null || echo "")
+        if [ -z "$PREV_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" | head -20)
+        else
+          CHANGELOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (%h)")
+        fi
+        echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ inputs.version }}
+        name: Release ${{ inputs.version }}
+        body: |
+          ## Release ${{ inputs.version }}
+
+          ### Changelog
+          ${{ steps.changelog.outputs.CHANGELOG }}
+
+          ### Docker Image
+          ```bash
+          docker pull ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.version }}
+          ```
+        files: bin/${{ inputs.app_name }}
+        draft: false
+        prerelease: false

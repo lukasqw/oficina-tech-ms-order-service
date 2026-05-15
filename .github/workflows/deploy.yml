@@ -1,0 +1,236 @@
+name: Deploy
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Docker image tag to deploy"
+        required: false
+        default: "latest"
+
+permissions:
+  contents: write
+  packages: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  # Repository Variables — configure in Settings → Secrets and Variables → Variables
+  # Required: APP_NAME, K8S_NAMESPACE, AWS_REGION, INFRA_TFSTATE_S3_PATH, DB_TFSTATE_S3_PATH
+  # Optional: GO_VERSION (default: 1.25), GO_MAIN_PATH (default: cmd/api/main.go),
+  #           SERVER_PORT (default: 8080), HEALTH_ENDPOINT (default: /health)
+  K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
+  AWS_REGION: ${{ vars.AWS_REGION }}
+
+jobs:
+  # ===========================================
+  # STAGE 1: Build & Test
+  # ===========================================
+  build-test:
+    name: Build & Test
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.bt.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Run Build & Test
+        id: bt
+        uses: ./.github/actions/build/test
+        with:
+          go_version: ${{ vars.GO_VERSION || '1.25' }}
+          go_main_path: ${{ vars.GO_MAIN_PATH || 'cmd/api/main.go' }}
+          app_name: ${{ vars.APP_NAME }}
+
+  # ===========================================
+  # STAGE 2: Build & Push Docker
+  # ===========================================
+  build-docker:
+    name: Build & Push Docker
+    needs: build-test
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build & Push Docker Image
+        uses: ./.github/actions/build/docker
+        with:
+          version: ${{ needs.build-test.outputs.version }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          ghcr_pat: ${{ secrets.GHCR_PAT }}
+
+  # ===========================================
+  # STAGE 3: Deploy to Kubernetes
+  # ===========================================
+  deploy-k8s:
+    name: Deploy to Kubernetes
+    needs: [build-test, build-docker]
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate Required Secrets
+        shell: bash
+        run: |
+          MISSING=()
+          [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]     && MISSING+=("AWS_ACCESS_KEY_ID")
+          [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && MISSING+=("AWS_SECRET_ACCESS_KEY")
+          [ -z "${{ secrets.DB_PASSWORD }}" ]            && MISSING+=("DB_PASSWORD")
+          [ -z "${{ secrets.GHCR_PAT }}" ]              && MISSING+=("GHCR_PAT")
+          [ -z "${{ secrets.DD_API_KEY }}" ]             && MISSING+=("DD_API_KEY")
+          [ -z "${{ secrets.DD_APP_KEY }}" ]             && MISSING+=("DD_APP_KEY")
+          if [ ${#MISSING[@]} -gt 0 ]; then
+            echo "::error::Required secrets missing: ${MISSING[*]}"
+            exit 1
+          fi
+
+      - name: Connect to Infrastructure
+        id: infra
+        uses: ./.github/actions/deploy/infra-connect
+        with:
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws_region: ${{ env.AWS_REGION }}
+          infra_tfstate_s3_path: ${{ vars.INFRA_TFSTATE_S3_PATH }}
+          db_tfstate_s3_path: ${{ vars.DB_TFSTATE_S3_PATH }}
+
+      - name: Provision Kubernetes Resources
+        uses: ./.github/actions/deploy/k8s-provision
+        with:
+          app_name: ${{ vars.APP_NAME }}
+          namespace: ${{ env.K8S_NAMESPACE }}
+          version: ${{ needs.build-test.outputs.version }}
+          server_port: ${{ vars.SERVER_PORT || '8080' }}
+          rds_address: ${{ steps.infra.outputs.rds_address }}
+          rds_port: ${{ steps.infra.outputs.rds_port }}
+          rds_dbname: ${{ steps.infra.outputs.rds_dbname }}
+          rds_user: ${{ steps.infra.outputs.rds_user }}
+          db_password: ${{ secrets.DB_PASSWORD }}
+          jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
+          smtp_host: ${{ secrets.SMTP_HOST }}
+          smtp_port: ${{ secrets.SMTP_PORT }}
+          smtp_username: ${{ secrets.SMTP_USERNAME }}
+          smtp_from: ${{ secrets.SMTP_FROM }}
+          smtp_password: ${{ secrets.SMTP_PASSWORD }}
+          ghcr_pat: ${{ secrets.GHCR_PAT }}
+          github_actor: ${{ github.actor }}
+          dd_api_key: ${{ secrets.DD_API_KEY }}
+          dd_app_key: ${{ secrets.DD_APP_KEY }}
+          dd_site: ${{ secrets.DD_SITE }}
+
+      - name: Deploy Application
+        uses: ./.github/actions/deploy/k8s-application
+        with:
+          app_name: ${{ vars.APP_NAME }}
+          namespace: ${{ env.K8S_NAMESPACE }}
+          version: ${{ needs.build-test.outputs.version }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          nlb_dns: ${{ steps.infra.outputs.nlb_dns }}
+          server_port: ${{ vars.SERVER_PORT || '8080' }}
+          health_endpoint: ${{ vars.HEALTH_ENDPOINT || '/health' }}
+
+      - name: Finalize Release Tag
+        if: github.event_name != 'workflow_dispatch'
+        uses: ./.github/actions/release/finalize-tag
+        with:
+          version: ${{ needs.build-test.outputs.version }}
+
+      - name: Deployment Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Deployment Summary"
+            echo ""
+            echo "| Resource | Value |"
+            echo "|----------|-------|"
+            echo "| Version | \`${{ needs.build-test.outputs.version }}\` |"
+            echo "| Cluster | \`${{ steps.infra.outputs.cluster_name }}\` |"
+            echo "| Region | \`${{ env.AWS_REGION }}\` |"
+            echo "| Namespace | \`${{ env.K8S_NAMESPACE }}\` |"
+            echo "| Image | \`${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build-test.outputs.version }}\` |"
+            echo "| RDS | \`${{ steps.infra.outputs.rds_address }}:${{ steps.infra.outputs.rds_port }}\` |"
+            echo "| NLB DNS | \`${{ steps.infra.outputs.nlb_dns }}\` |"
+            echo ""
+            echo "**Endpoints:**"
+            echo "- Health: http://${{ steps.infra.outputs.nlb_dns }}/health"
+            echo "- API: http://${{ steps.infra.outputs.nlb_dns }}/"
+          } >> $GITHUB_STEP_SUMMARY
+
+  # ===========================================
+  # STAGE 4: GitHub Release
+  # ===========================================
+  github-release:
+    name: GitHub Release
+    needs: [build-test, deploy-k8s]
+    if: ${{ !failure() && !cancelled() && github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Publish GitHub Release
+        uses: ./.github/actions/release/publish
+        with:
+          app_name: ${{ vars.APP_NAME }}
+          version: ${{ needs.build-test.outputs.version }}
+          registry: ${{ env.REGISTRY }}
+          image_name: ${{ env.IMAGE_NAME }}
+          go_version: ${{ vars.GO_VERSION || '1.25' }}
+          go_main_path: ${{ vars.GO_MAIN_PATH || 'cmd/api/main.go' }}
+
+  # ===========================================
+  # STAGE 5: SonarQube
+  # ===========================================
+  sonarqube:
+    name: SonarQube
+    needs: build-test
+    if: ${{ !failure() && !cancelled() && github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        uses: ./.github/actions/quality/sonarqube
+        with:
+          sonar_token: ${{ secrets.SONAR_TOKEN }}
+          sonar_host_url: ${{ secrets.SONAR_HOST_URL }}

@@ -1,0 +1,175 @@
+name: 'Deploy — Provision Kubernetes Resources'
+description: >
+  Creates the namespace, ConfigMap, application secrets and deploys the
+  Datadog Agent via Helm. All operations are idempotent — safe to run on
+  every deploy.
+
+inputs:
+  app_name:
+    description: 'Application name — used to derive Kubernetes resource names (e.g. oficina-tech)'
+    required: true
+  namespace:
+    description: 'Kubernetes namespace'
+    required: true
+  version:
+    description: 'Application version (e.g. v1.2.0) — written to APP_VERSION in ConfigMap'
+    required: true
+  server_port:
+    description: 'Port the application listens on'
+    required: false
+    default: '8080'
+  # Database (discovered from Terraform state)
+  rds_address:
+    description: 'RDS endpoint address'
+    required: true
+  rds_port:
+    description: 'RDS port'
+    required: true
+  rds_dbname:
+    description: 'RDS database name'
+    required: true
+  rds_user:
+    description: 'RDS username'
+    required: true
+  # Application secrets
+  db_password:
+    description: 'Database password'
+    required: true
+  jwt_secret_key:
+    description: 'JWT signing secret'
+    required: false
+    default: 'default-jwt-secret-key-change-me-32chars'
+  # SMTP (optional)
+  smtp_host:
+    description: 'SMTP host'
+    required: false
+    default: 'smtp.gmail.com'
+  smtp_port:
+    description: 'SMTP port'
+    required: false
+    default: '587'
+  smtp_username:
+    description: 'SMTP username'
+    required: false
+    default: ''
+  smtp_from:
+    description: 'SMTP from address'
+    required: false
+    default: ''
+  smtp_password:
+    description: 'SMTP password'
+    required: false
+    default: ''
+  # Registry pull secret
+  ghcr_pat:
+    description: 'GitHub Container Registry personal access token'
+    required: true
+  github_actor:
+    description: 'GitHub actor (github.actor) — used as docker registry username'
+    required: true
+  # Datadog
+  dd_api_key:
+    description: 'Datadog API key'
+    required: true
+  dd_app_key:
+    description: 'Datadog application key'
+    required: true
+  dd_site:
+    description: 'Datadog site (e.g. datadoghq.com)'
+    required: true
+  datadog_chart_version:
+    description: 'Datadog Helm chart version to install (e.g. 3.75.0). Pin this to avoid unintended upgrades.'
+    required: false
+    default: '3.75.0'
+
+runs:
+  using: composite
+  steps:
+    - name: Create Namespace
+      shell: bash
+      run: kubectl apply -f k8s/namespace.yaml
+
+    - name: Create ConfigMap
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+      run: |
+        cat <<EOF | kubectl apply -f -
+        apiVersion: v1
+        kind: ConfigMap
+        metadata:
+          name: $APP_NAME-config
+          namespace: ${{ inputs.namespace }}
+        data:
+          DB_HOST: "${{ inputs.rds_address }}"
+          DB_PORT: "${{ inputs.rds_port }}"
+          DB_NAME: "${{ inputs.rds_dbname }}"
+          DB_USER: "${{ inputs.rds_user }}"
+          SERVER_PORT: "${{ inputs.server_port }}"
+          APP_ENV: "production"
+          APP_VERSION: "${{ inputs.version }}"
+          SMTP_HOST: "${{ inputs.smtp_host }}"
+          SMTP_PORT: "${{ inputs.smtp_port }}"
+          SMTP_USERNAME: "${{ inputs.smtp_username }}"
+          SMTP_FROM: "${{ inputs.smtp_from }}"
+        EOF
+        echo "::notice::ConfigMap $APP_NAME-config created"
+
+    - name: Create Secrets
+      shell: bash
+      env:
+        APP_NAME: ${{ inputs.app_name }}
+      run: |
+        # Image pull secret for GitHub Container Registry
+        kubectl create secret docker-registry ghcr-secret \
+          --docker-server=ghcr.io \
+          --docker-username=${{ inputs.github_actor }} \
+          --docker-password=${{ inputs.ghcr_pat }} \
+          --docker-email=${{ inputs.github_actor }}@users.noreply.github.com \
+          -n ${{ inputs.namespace }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+        # Application secrets
+        kubectl create secret generic "$APP_NAME-secret" \
+          --from-literal=DB_PASSWORD=${{ inputs.db_password }} \
+          --from-literal=JWT_SECRET_KEY=${{ inputs.jwt_secret_key }} \
+          --from-literal=SMTP_PASSWORD=${{ inputs.smtp_password }} \
+          -n ${{ inputs.namespace }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+        # Datadog Agent secret (referenced by Helm chart)
+        kubectl create secret generic datadog-secret \
+          --from-literal=api-key=${{ inputs.dd_api_key }} \
+          --from-literal=app-key=${{ inputs.dd_app_key }} \
+          -n ${{ inputs.namespace }} \
+          --dry-run=client -o yaml | kubectl apply -f -
+
+        echo "::notice::Secrets created"
+
+    - name: Deploy Datadog Agent
+      shell: bash
+      env:
+        DD_SITE: ${{ inputs.dd_site }}
+        CHART_VERSION: ${{ inputs.datadog_chart_version }}
+        NAMESPACE: ${{ inputs.namespace }}
+      run: |
+        helm repo add datadog https://helm.datadoghq.com
+
+        INSTALLED=$(helm list -n "$NAMESPACE" -o json 2>/dev/null \
+          | jq -r '.[] | select(.name=="datadog") | .chart' || echo "")
+        TARGET="datadog-${CHART_VERSION}"
+
+        if [ "$INSTALLED" == "$TARGET" ]; then
+          echo "::notice::Datadog $CHART_VERSION already installed — skipping helm upgrade"
+        else
+          echo "::notice::Installing/upgrading Datadog: $INSTALLED → $TARGET"
+          # apiKeyExistingSecret and appKeyExistingSecret are configured in values.yaml
+          helm upgrade --install datadog datadog/datadog \
+            --namespace "$NAMESPACE" \
+            --version "$CHART_VERSION" \
+            -f k8s/datadog/values.yaml \
+            --set datadog.site="$DD_SITE" \
+            --wait \
+            --timeout 10m
+          echo "::notice::Datadog Agent deployed"
+        fi

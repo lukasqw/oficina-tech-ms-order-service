@@ -1,0 +1,153 @@
+name: 'Build — Test & Coverage'
+description: >
+  Extracts the version from the branch name or tag, runs Go tests with coverage,
+  and uploads the coverage artifact. Output 'version' is consumed by downstream jobs.
+
+inputs:
+  go_version:
+    description: 'Go version to use'
+    required: false
+    default: '1.25'
+  go_main_path:
+    description: 'Path to the Go main package entry point'
+    required: false
+    default: 'cmd/api/main.go'
+  app_name:
+    description: 'Application name — used as binary filename (e.g. oficina-tech)'
+    required: false
+    default: 'app'
+
+outputs:
+  version:
+    description: 'Resolved version tag (e.g. v1.2.0)'
+    value: ${{ steps.version.outputs.VERSION }}
+
+runs:
+  using: composite
+  steps:
+    # Resolves the version to deploy:
+    #   - workflow_dispatch: uses the provided image_tag input (or latest git tag)
+    #   - pull_request closed: extracts from branch name release/vX.Y.Z
+    - name: Extract Version
+      id: version
+      shell: bash
+      run: |
+        if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+          TAG="${{ github.event.inputs.image_tag }}"
+          if [ "$TAG" == "latest" ]; then
+            TAG=$(git describe --tags --sort=-v:refname 2>/dev/null | head -1 || echo "v0.0.0")
+          fi
+        else
+          BRANCH_NAME="${{ github.event.pull_request.head.ref }}"
+          TAG=${BRANCH_NAME#release/}
+        fi
+        echo "VERSION=$TAG" >> $GITHUB_OUTPUT
+        echo "::notice::Version: $TAG"
+
+    - name: Setup Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ inputs.go_version }}
+        cache: true
+
+    - name: Run Tests
+      shell: bash
+      run: |
+        go mod download
+        go test ./... -v -coverprofile=coverage.out -covermode=atomic 2>&1 | tee /tmp/test-output.txt
+        echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_ENV
+
+    - name: Coverage Summary
+      if: always()
+      shell: bash
+      run: |
+        if [ ! -f coverage.out ]; then
+          echo "coverage.out not found — tests may have failed before coverage was written"
+          exit 0
+        fi
+
+        # Total coverage %
+        TOTAL=$(go tool cover -func=coverage.out | grep '^total:' | awk '{print $3}')
+
+        # Per-package coverage
+        PACKAGES=$(go tool cover -func=coverage.out \
+          | grep -v '^total:' \
+          | awk '{print $1}' \
+          | sed 's|/[^/]*$||' \
+          | sort -u)
+
+        {
+          echo "## Test Coverage — ${{ steps.version.outputs.VERSION }}"
+          echo ""
+          echo "| | |"
+          echo "|---|---|"
+          echo "| **Total** | **$TOTAL** |"
+          echo "| Go version | \`${{ inputs.go_version }}\` |"
+          echo ""
+
+          # Coverage badge thresholds
+          TOTAL_NUM=${TOTAL//%/}
+          if awk "BEGIN{exit !($TOTAL_NUM >= 80)}"; then
+            echo "> **Coverage is healthy ($TOTAL)**"
+          elif awk "BEGIN{exit !($TOTAL_NUM >= 50)}"; then
+            echo "> **Coverage is moderate ($TOTAL) — consider adding tests**"
+          else
+            echo "> **Coverage is low ($TOTAL) — tests needed**"
+          fi
+
+          echo ""
+          echo "### Per-package"
+          echo ""
+          echo "| Package | Coverage |"
+          echo "|---------|----------|"
+
+          go tool cover -func=coverage.out \
+            | grep -v '^total:' \
+            | awk '
+              {
+                split($1, parts, ":")
+                pkg = parts[1]
+                fn  = parts[2]
+                cov = $3
+                gsub(/.*\//, "", pkg)
+                pkgfull[fn] = $1
+                if (!(pkg in best) || cov+0 > best[pkg]+0) {
+                  best[pkg] = cov
+                  label[pkg] = pkg
+                }
+              }
+              END {
+                for (p in label) print "| `" label[p] "` | " best[p] " |"
+              }
+            ' \
+            | sort
+
+          echo ""
+          echo "### Failed Tests"
+          echo ""
+          echo "\`\`\`"
+          grep -E "^--- FAIL|^FAIL" /tmp/test-output.txt || echo "All tests passed"
+          echo "\`\`\`"
+        } >> $GITHUB_STEP_SUMMARY
+
+    - name: Build Binary
+      shell: bash
+      run: |
+        mkdir -p bin
+        go build -ldflags="-s -w -X main.Version=${{ steps.version.outputs.VERSION }}" \
+          -o bin/${{ inputs.app_name }} ${{ inputs.go_main_path }}
+        echo "::notice::Binary built: bin/${{ inputs.app_name }}"
+
+    - name: Upload Binary
+      uses: actions/upload-artifact@v4
+      with:
+        name: binary-${{ steps.version.outputs.VERSION }}
+        path: bin/${{ inputs.app_name }}
+        retention-days: 1
+
+    - name: Upload Coverage
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: coverage.out
+        retention-days: 1
