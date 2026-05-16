@@ -54,7 +54,7 @@ runs:
       shell: bash
       run: |
         go mod download
-        go test ./... -v -coverprofile=coverage.out -covermode=atomic 2>&1 | tee /tmp/test-output.txt
+        go test ./internal/... -v -coverprofile=coverage.out -covermode=atomic 2>&1 | tee /tmp/test-output.txt
         echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_ENV
 
     - name: Coverage Summary
@@ -129,6 +129,18 @@ runs:
           grep -E "^--- FAIL|^FAIL" /tmp/test-output.txt || echo "All tests passed"
           echo "\`\`\`"
         } >> $GITHUB_STEP_SUMMARY
+
+    - name: Coverage Gate
+      shell: bash
+      run: |
+        if [ ! -f coverage.out ]; then
+          echo "::error::coverage.out not found"
+          exit 1
+        fi
+        COVERAGE=$(go tool cover -func=coverage.out | awk '/total:/ { sub(/%/, "", $3); print $3 }')
+        echo "Coverage: ${COVERAGE}%"
+        awk -v coverage="$COVERAGE" 'BEGIN { exit !(coverage >= 5.0) }' || \
+          (echo "::error::Coverage ${COVERAGE}% is below the 5% threshold" && exit 1)
 
     - name: Build Binary
       shell: bash
