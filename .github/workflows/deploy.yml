@@ -157,8 +157,8 @@ jobs:
           sqs_inventory_op_succeeded_url: ${{ steps.infra.outputs.sqs_inventory_op_succeeded_url }}
           sqs_inventory_op_failed_url: ${{ steps.infra.outputs.sqs_inventory_op_failed_url }}
           sqs_customer_deleted_url: ${{ steps.infra.outputs.sqs_customer_deleted_url }}
-          ms1_base_url: ${{ vars.MS1_BASE_URL }}
-          ms3_base_url: ${{ vars.MS3_BASE_URL }}
+          ms1_app_name: ${{ vars.MS1_APP_NAME || 'ms-identity' }}
+          ms3_app_name: ${{ vars.MS3_APP_NAME || 'ms-workshop' }}
           mp_notification_url: ${{ vars.MP_NOTIFICATION_URL }}
           db_password: ${{ secrets.DB_PASSWORD }}
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
