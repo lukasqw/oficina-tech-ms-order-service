@@ -1,4 +1,5 @@
-name: Deploy
+﻿name: Deploy
+run-name: 🚀 ${{ github.event.pull_request.title || format('Deploy {0}', github.ref_name) }}
 
 on:
   pull_request:
@@ -25,16 +26,21 @@ concurrency:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
-  # Repository Variables — configure in Settings → Secrets and Variables → Variables
-  # Required: APP_NAME, K8S_NAMESPACE, AWS_REGION, INFRA_TFSTATE_S3_PATH, DB_TFSTATE_S3_PATH
+  # Repository Variables â€” configure in Settings â†’ Secrets and Variables â†’ Variables
+  # Required: APP_NAME, K8S_NAMESPACE, AWS_REGION, INFRA_TFSTATE_S3_PATH, DB_TFSTATE_S3_PATH,
+  #           MS1_BASE_URL, MS3_BASE_URL, MP_NOTIFICATION_URL,
+  #           SQS_INVENTORY_OP_REQUESTED_URL, SQS_INVENTORY_OP_SUCCEEDED_URL,
+  #           SQS_INVENTORY_OP_FAILED_URL, SQS_CUSTOMER_DELETED_URL
   # Optional: GO_VERSION (default: 1.25), GO_MAIN_PATH (default: cmd/api/main.go),
-  #           SERVER_PORT (default: 8080), HEALTH_ENDPOINT (default: /health)
-  K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE }}
+  #           SERVER_PORT (default: 8082), HEALTH_ENDPOINT (default: /health)
+  K8S_NAMESPACE: ${{ vars.K8S_NAMESPACE || 'app-oficina-tech' }}
   AWS_REGION: ${{ vars.AWS_REGION }}
 
 jobs:
   # ===========================================
   # STAGE 1: Build & Test
+  # Unit tests + BDD are enforced in CI (branch protection).
+  # This stage verifies the build compiles cleanly on main.
   # ===========================================
   build-test:
     name: Build & Test
@@ -81,6 +87,9 @@ jobs:
           version: ${{ needs.build-test.outputs.version }}
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
           ghcr_pat: ${{ secrets.GHCR_PAT }}
 
   # ===========================================
@@ -104,9 +113,17 @@ jobs:
           [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]     && MISSING+=("AWS_ACCESS_KEY_ID")
           [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && MISSING+=("AWS_SECRET_ACCESS_KEY")
           [ -z "${{ secrets.DB_PASSWORD }}" ]            && MISSING+=("DB_PASSWORD")
+          [ -z "${{ secrets.JWT_SECRET_KEY }}" ]         && MISSING+=("JWT_SECRET_KEY")
           [ -z "${{ secrets.GHCR_PAT }}" ]              && MISSING+=("GHCR_PAT")
           [ -z "${{ secrets.DD_API_KEY }}" ]             && MISSING+=("DD_API_KEY")
           [ -z "${{ secrets.DD_APP_KEY }}" ]             && MISSING+=("DD_APP_KEY")
+          [ -z "${{ vars.SMTP_HOST }}" ]              && MISSING+=("SMTP_HOST")
+          [ -z "${{ vars.SMTP_USERNAME }}" ]          && MISSING+=("SMTP_USERNAME")
+          [ -z "${{ secrets.SMTP_PASSWORD }}" ]          && MISSING+=("SMTP_PASSWORD")
+          [ -z "${{ secrets.MP_ACCESS_TOKEN }}" ]        && MISSING+=("MP_ACCESS_TOKEN")
+          [ -z "${{ secrets.MP_WEBHOOK_SECRET }}" ]      && MISSING+=("MP_WEBHOOK_SECRET")
+          [ -z "${{ vars.INFRA_TFSTATE_S3_PATH }}" ] && MISSING+=("INFRA_TFSTATE_S3_PATH")
+          [ -z "${{ vars.DB_TFSTATE_S3_PATH }}" ]    && MISSING+=("DB_TFSTATE_S3_PATH")
           if [ ${#MISSING[@]} -gt 0 ]; then
             echo "::error::Required secrets missing: ${MISSING[*]}"
             exit 1
@@ -122,6 +139,7 @@ jobs:
           aws_region: ${{ env.AWS_REGION }}
           infra_tfstate_s3_path: ${{ vars.INFRA_TFSTATE_S3_PATH }}
           db_tfstate_s3_path: ${{ vars.DB_TFSTATE_S3_PATH }}
+          db_ms_key: ms2
 
       - name: Provision Kubernetes Resources
         uses: ./.github/actions/deploy/k8s-provision
@@ -129,23 +147,37 @@ jobs:
           app_name: ${{ vars.APP_NAME }}
           namespace: ${{ env.K8S_NAMESPACE }}
           version: ${{ needs.build-test.outputs.version }}
-          server_port: ${{ vars.SERVER_PORT || '8080' }}
+          server_port: ${{ vars.SERVER_PORT || '8082' }}
           rds_address: ${{ steps.infra.outputs.rds_address }}
           rds_port: ${{ steps.infra.outputs.rds_port }}
           rds_dbname: ${{ steps.infra.outputs.rds_dbname }}
           rds_user: ${{ steps.infra.outputs.rds_user }}
+          aws_region: ${{ env.AWS_REGION }}
+          dynamodb_table: ${{ steps.infra.outputs.dynamodb_table }}
+          sqs_inventory_op_requested_url: ${{ steps.infra.outputs.sqs_inventory_op_requested_url }}
+          sqs_inventory_op_succeeded_url: ${{ steps.infra.outputs.sqs_inventory_op_succeeded_url }}
+          sqs_inventory_op_failed_url: ${{ steps.infra.outputs.sqs_inventory_op_failed_url }}
+          sqs_customer_deleted_url: ${{ steps.infra.outputs.sqs_customer_deleted_url }}
+          ms1_base_url: ${{ vars.MS1_BASE_URL }}
+          ms3_base_url: ${{ vars.MS3_BASE_URL }}
+          mp_notification_url: ${{ vars.MP_NOTIFICATION_URL }}
           db_password: ${{ secrets.DB_PASSWORD }}
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
-          smtp_host: ${{ secrets.SMTP_HOST }}
-          smtp_port: ${{ secrets.SMTP_PORT }}
-          smtp_username: ${{ secrets.SMTP_USERNAME }}
-          smtp_from: ${{ secrets.SMTP_FROM }}
+          smtp_host: ${{ vars.SMTP_HOST }}
+          smtp_port: ${{ vars.SMTP_PORT }}
+          smtp_username: ${{ vars.SMTP_USERNAME }}
+          smtp_from: ${{ vars.SMTP_FROM }}
           smtp_password: ${{ secrets.SMTP_PASSWORD }}
+          mp_access_token: ${{ secrets.MP_ACCESS_TOKEN }}
+          mp_webhook_secret: ${{ secrets.MP_WEBHOOK_SECRET }}
+          aws_access_key_id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws_session_token: ${{ secrets.AWS_SESSION_TOKEN }}
           ghcr_pat: ${{ secrets.GHCR_PAT }}
           github_actor: ${{ github.actor }}
           dd_api_key: ${{ secrets.DD_API_KEY }}
           dd_app_key: ${{ secrets.DD_APP_KEY }}
-          dd_site: ${{ secrets.DD_SITE }}
+          dd_site: ${{ vars.DD_SITE }}
 
       - name: Deploy Application
         uses: ./.github/actions/deploy/k8s-application
@@ -156,9 +188,11 @@ jobs:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
           nlb_dns: ${{ steps.infra.outputs.nlb_dns }}
-          server_port: ${{ vars.SERVER_PORT || '8080' }}
+          server_port: ${{ vars.SERVER_PORT || '8082' }}
           health_endpoint: ${{ vars.HEALTH_ENDPOINT || '/health' }}
 
+      # Tag criada apenas apÃ³s health check confirmado â€” garante que a tag
+      # representa exatamente o que estÃ¡ rodando em produÃ§Ã£o.
       - name: Finalize Release Tag
         if: github.event_name != 'workflow_dispatch'
         uses: ./.github/actions/release/finalize-tag
@@ -184,11 +218,16 @@ jobs:
             echo ""
             echo "**Endpoints:**"
             echo "- Health: http://${{ steps.infra.outputs.nlb_dns }}/health"
+            echo "- Swagger: http://${{ steps.infra.outputs.nlb_dns }}/swagger/index.html"
+            echo "- MP Webhook: http://${{ steps.infra.outputs.nlb_dns }}/payments/mp-webhook"
             echo "- API: http://${{ steps.infra.outputs.nlb_dns }}/"
           } >> $GITHUB_STEP_SUMMARY
 
   # ===========================================
   # STAGE 4: GitHub Release
+  # Runs after deploy-k8s so the Release is published only after the tag is
+  # confirmed created in production (finalize-release-tag). This guarantees
+  # the tag already exists when softprops/action-gh-release attaches to it.
   # ===========================================
   github-release:
     name: GitHub Release
@@ -233,4 +272,4 @@ jobs:
         uses: ./.github/actions/quality/sonarqube
         with:
           sonar_token: ${{ secrets.SONAR_TOKEN }}
-          sonar_host_url: ${{ secrets.SONAR_HOST_URL }}
+          sonar_host_url: ${{ vars.SONAR_HOST_URL }}

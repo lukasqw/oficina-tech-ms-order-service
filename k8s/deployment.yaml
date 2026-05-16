@@ -1,36 +1,67 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: ms2-os-service
+  name: ${APP_NAME}-deployment
+  namespace: ${NAMESPACE}
 spec:
   replicas: 2
   selector:
     matchLabels:
-      app: ms2-os-service
+      app: ${APP_NAME}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
   template:
     metadata:
       labels:
-        app: ms2-os-service
+        app: ${APP_NAME}
     spec:
+      terminationGracePeriodSeconds: 30
+      imagePullSecrets:
+        - name: ghcr-secret
       containers:
-        - name: api
-          image: ghcr.io/lukasqw/oficina-tech-ms2-os-service:latest
+        - name: ${APP_NAME}
+          image: ghcr.io/placeholder/placeholder:latest
           ports:
-            - containerPort: 8082
+            - containerPort: ${SERVER_PORT}
           envFrom:
             - configMapRef:
-                name: ms2-os-service-config
+                name: ${APP_NAME}-config
             - secretRef:
-                name: ms2-os-service-secret
-          readinessProbe:
-            httpGet:
-              path: /health
-              port: 8082
-            initialDelaySeconds: 5
-            periodSeconds: 10
+                name: ${APP_NAME}-secret
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "768Mi"
+              cpu: "500m"
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
           livenessProbe:
             httpGet:
               path: /health
-              port: 8082
-            initialDelaySeconds: 15
-            periodSeconds: 20
+              port: ${SERVER_PORT}
+            initialDelaySeconds: 60
+            periodSeconds: 10
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: ${SERVER_PORT}
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 3
+          startupProbe:
+            httpGet:
+              path: /health
+              port: ${SERVER_PORT}
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 36

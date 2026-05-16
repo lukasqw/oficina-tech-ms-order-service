@@ -273,7 +273,7 @@ func TestBuildPreferenceItemsFallback(t *testing.T) {
 }
 
 func TestCreatePaymentPreferenceBuildsItemsInBRL(t *testing.T) {
-	order := completedOrder(t)
+	order := completedOrder(t) //nolint:ineffassign,staticcheck // value is overwritten by ReconstructServiceOrder; call needed for store side-effect
 	item, err := service_order.NewServiceOrderItem(testOrderID, service_order.ItemTypeService, "44444444-4444-4444-8444-444444444444", "Troca de óleo", 2, 12345)
 	if err != nil {
 		t.Fatalf("NewServiceOrderItem() error = %v", err)
