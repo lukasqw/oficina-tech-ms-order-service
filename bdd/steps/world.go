@@ -24,11 +24,14 @@ type World struct {
 	AdminEmail string
 	AdminPass  string
 
-	AdminToken string
+	AdminToken    string
+	CustomerToken string
 
 	// Identifiers captured during the scenario.
-	CustomerID string
-	VehicleID  string
+	CustomerID       string
+	CustomerCPF      string
+	CustomerPassword string
+	VehicleID        string
 	ProductID  string
 	ServiceID  string
 	OrderID    string

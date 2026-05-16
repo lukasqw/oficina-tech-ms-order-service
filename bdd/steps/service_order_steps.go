@@ -60,6 +60,8 @@ func RegisterScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^o cliente abre uma OS com troca de óleo e filtro de ar$`, w.openServiceOrder)
 	ctx.Step(`^o mecânico avança a OS para ([A-Z_]+)$`, w.advanceServiceOrder)
 	ctx.Step(`^o mecânico tenta avançar a OS de ([A-Z_]+) para ([A-Z_]+)$`, w.tryAdvanceFrom)
+	ctx.Step(`^o cliente faz login no sistema$`, w.customerLogin)
+	ctx.Step(`^o cliente lista suas ordens de serviço$`, w.customerListsOrders)
 	ctx.Step(`^o cliente aprova a OS$`, w.approveAuthorization)
 	ctx.Step(`^o cliente nega a autorização$`, w.denyAuthorization)
 	ctx.Step(`^o cliente cancela a OS$`, w.cancelOrder)
@@ -67,6 +69,7 @@ func RegisterScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^customer X é deletado no MS1$`, w.deleteCustomer)
 
 	// ─── Outcome steps ─────────────────────────────────────────────────
+	ctx.Step(`^a OS aparece na lista com status ([A-Z_]+)$`, w.assertOrderInCustomerList)
 	ctx.Step(`^a OS é criada com status ([A-Z_]+)$`, w.assertOrderStatus)
 	ctx.Step(`^a OS está em ([A-Z_]+)$`, w.assertOrderStatusEventually)
 	ctx.Step(`^a OS avança para ([A-Z_]+)$`, w.assertOrderStatusEventually)
@@ -88,12 +91,17 @@ func RegisterScenario(ctx *godog.ScenarioContext) {
 func (w *World) givenCustomerWithVehicle(ctx context.Context) error {
 	suffix := uuid.NewString()[:8]
 
+	cpf := randomCPF(suffix)
+	password := "cliente1234"
+	w.CustomerCPF = cpf
+	w.CustomerPassword = password
+
 	customerBody := map[string]string{
 		"name":          "Cliente E2E " + suffix,
 		"email":         "cliente-" + suffix + "@oficina.test",
-		"password":      "cliente1234",
+		"password":      password,
 		"phone":         "11987654321",
-		"document":      randomCPF(suffix),
+		"document":      cpf,
 		"document_type": "CPF",
 	}
 	status, raw, err := doJSON(ctx, w, http.MethodPost, w.MS1URL+"/customers", customerBody, w.AdminToken)
@@ -288,10 +296,85 @@ func (w *World) tryAdvanceFrom(ctx context.Context, from, to string) error {
 	return w.advanceServiceOrder(ctx, to)
 }
 
+func (w *World) customerLogin(ctx context.Context) error {
+	body := map[string]string{
+		"cpf":      w.CustomerCPF,
+		"password": w.CustomerPassword,
+	}
+	status, raw, err := doJSON(ctx, w, http.MethodPost, w.MS1URL+"/customers/auth/login", body, "")
+	if err != nil {
+		return err
+	}
+	if err := expectStatus(http.StatusOK, status, raw); err != nil {
+		return err
+	}
+	var resp struct {
+		Token string `json:"token"`
+	}
+	if err := decodeData(raw, &resp); err != nil {
+		return err
+	}
+	w.CustomerToken = resp.Token
+	return nil
+}
+
+func (w *World) customerListsOrders(ctx context.Context) error {
+	if w.CustomerToken == "" {
+		if err := w.customerLogin(ctx); err != nil {
+			return err
+		}
+	}
+	status, raw, err := doJSON(ctx, w, http.MethodGet, w.MS2URL+"/service-orders", nil, w.CustomerToken)
+	if err != nil {
+		return err
+	}
+	return expectStatus(http.StatusOK, status, raw)
+}
+
+func (w *World) assertOrderInCustomerList(ctx context.Context, expectedStatus string) error {
+	if w.CustomerToken == "" {
+		if err := w.customerLogin(ctx); err != nil {
+			return err
+		}
+	}
+	status, raw, err := doJSON(ctx, w, http.MethodGet, w.MS2URL+"/service-orders", nil, w.CustomerToken)
+	if err != nil {
+		return err
+	}
+	if err := expectStatus(http.StatusOK, status, raw); err != nil {
+		return err
+	}
+	var orders []struct {
+		ID         string `json:"id"`
+		CustomerID string `json:"customer_id"`
+		Status     string `json:"status"`
+	}
+	if err := decodeData(raw, &orders); err != nil {
+		return err
+	}
+	for _, o := range orders {
+		if o.ID == w.OrderID {
+			if o.Status != expectedStatus {
+				return fmt.Errorf("OS %s com status %s, esperado %s", w.OrderID, o.Status, expectedStatus)
+			}
+			if o.CustomerID != w.CustomerID {
+				return fmt.Errorf("OS %s pertence ao customer %s, esperado %s", w.OrderID, o.CustomerID, w.CustomerID)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("OS %s não encontrada na lista do cliente", w.OrderID)
+}
+
 func (w *World) approveAuthorization(ctx context.Context) error {
+	if w.CustomerToken == "" {
+		if err := w.customerLogin(ctx); err != nil {
+			return err
+		}
+	}
 	url := fmt.Sprintf("%s/service-orders/%s/authorize", w.MS2URL, w.OrderID)
 	body := map[string]any{"approved": true}
-	status, raw, err := doJSON(ctx, w, http.MethodPost, url, body, w.AdminToken)
+	status, raw, err := doJSON(ctx, w, http.MethodPost, url, body, w.CustomerToken)
 	if err != nil {
 		return err
 	}
@@ -302,9 +385,14 @@ func (w *World) approveAuthorization(ctx context.Context) error {
 }
 
 func (w *World) denyAuthorization(ctx context.Context) error {
+	if w.CustomerToken == "" {
+		if err := w.customerLogin(ctx); err != nil {
+			return err
+		}
+	}
 	url := fmt.Sprintf("%s/service-orders/%s/authorize", w.MS2URL, w.OrderID)
 	body := map[string]any{"approved": false}
-	status, raw, err := doJSON(ctx, w, http.MethodPost, url, body, w.AdminToken)
+	status, raw, err := doJSON(ctx, w, http.MethodPost, url, body, w.CustomerToken)
 	if err != nil {
 		return err
 	}
