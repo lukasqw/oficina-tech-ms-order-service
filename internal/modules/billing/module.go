@@ -27,7 +27,11 @@ func NewModule(
 	client payment.MercadoPagoClient,
 ) *Module {
 	if client == nil {
-		client = mercado_pago.NewClientFromEnv()
+		if os.Getenv("MP_ACCESS_TOKEN") != "" {
+			client = mercado_pago.NewClientFromEnv()
+		} else {
+			client = mercado_pago.NewNoOpClient()
+		}
 	}
 	return &Module{
 		MercadoPagoClient:    client,
