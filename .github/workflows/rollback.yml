@@ -87,8 +87,7 @@ jobs:
           [ -z "${{ vars.SMTP_HOST }}" ]              && MISSING+=("SMTP_HOST")
           [ -z "${{ vars.SMTP_USERNAME }}" ]          && MISSING+=("SMTP_USERNAME")
           [ -z "${{ secrets.SMTP_PASSWORD }}" ]          && MISSING+=("SMTP_PASSWORD")
-          [ -z "${{ secrets.MP_ACCESS_TOKEN }}" ]        && MISSING+=("MP_ACCESS_TOKEN")
-          [ -z "${{ secrets.MP_WEBHOOK_SECRET }}" ]      && MISSING+=("MP_WEBHOOK_SECRET")
+
           if [ ${#MISSING[@]} -gt 0 ]; then
             echo "::error::Required secrets missing: ${MISSING[*]}"
             exit 1
