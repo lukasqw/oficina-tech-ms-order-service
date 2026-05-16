@@ -95,6 +95,17 @@ inputs:
   jwt_secret_key:
     description: 'JWT signing secret (shared across all MSs)'
     required: true
+  # AWS credentials — required for SQS/SNS access from pods
+  aws_access_key_id:
+    description: 'AWS Access Key ID'
+    required: true
+  aws_secret_access_key:
+    description: 'AWS Secret Access Key'
+    required: true
+  aws_session_token:
+    description: 'AWS Session Token (temporary credentials)'
+    required: false
+    default: ''
   smtp_password:
     description: 'SMTP password'
     required: false
@@ -157,10 +168,10 @@ runs:
           APP_VERSION: "${{ inputs.version }}"
           AWS_REGION: "${{ inputs.aws_region }}"
           DYNAMODB_TABLE_ORDER_HISTORY: "${{ inputs.dynamodb_table }}"
-          SQS_INVENTORY_OP_REQUESTED_URL: "${{ inputs.sqs_inventory_op_requested_url }}"
-          SQS_INVENTORY_OP_SUCCEEDED_URL: "${{ inputs.sqs_inventory_op_succeeded_url }}"
-          SQS_INVENTORY_OP_FAILED_URL: "${{ inputs.sqs_inventory_op_failed_url }}"
-          SQS_CUSTOMER_DELETED_URL: "${{ inputs.sqs_customer_deleted_url }}"
+          ORDER_INVENTORY_OP_REQUESTED_QUEUE_URL: "${{ inputs.sqs_inventory_op_requested_url }}"
+          ORDER_INVENTORY_OP_SUCCEEDED_QUEUE_URL: "${{ inputs.sqs_inventory_op_succeeded_url }}"
+          ORDER_INVENTORY_OP_FAILED_QUEUE_URL: "${{ inputs.sqs_inventory_op_failed_url }}"
+          CUSTOMER_DELETED_QUEUE_URL: "${{ inputs.sqs_customer_deleted_url }}"
           MS1_BASE_URL: "${{ inputs.ms1_base_url }}"
           MS3_BASE_URL: "${{ inputs.ms3_base_url }}"
           MP_NOTIFICATION_URL: "${{ inputs.mp_notification_url }}"
@@ -190,6 +201,9 @@ runs:
           --from-literal=SMTP_PASSWORD=${{ inputs.smtp_password }} \
           --from-literal=MP_ACCESS_TOKEN=${{ inputs.mp_access_token }} \
           --from-literal=MP_WEBHOOK_SECRET=${{ inputs.mp_webhook_secret }} \
+          --from-literal=AWS_ACCESS_KEY_ID=${{ inputs.aws_access_key_id }} \
+          --from-literal=AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }} \
+          --from-literal=AWS_SESSION_TOKEN=${{ inputs.aws_session_token }} \
           -n ${{ inputs.namespace }} \
           --dry-run=client -o yaml | kubectl apply -f -
 

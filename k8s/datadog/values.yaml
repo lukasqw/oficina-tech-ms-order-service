@@ -1,0 +1,62 @@
+## Datadog Agent Helm chart values
+## Chart: datadog/datadog
+
+datadog:
+  # API key is provided via the datadog-secret
+  apiKeyExistingSecret: datadog-secret
+  appKeyExistingSecret: datadog-secret
+
+  # site is injected at deploy time via --set datadog.site from DD_SITE secret
+
+  # Enable OTLP receiver on port 4317 (gRPC)
+  otlp:
+    receiver:
+      protocols:
+        grpc:
+          enabled: true
+          endpoint: "0.0.0.0:4317"
+
+  # Enable log collection from containers
+  logs:
+    enabled: true
+    containerCollectAll: true
+
+  # Enable APM
+  apm:
+    portEnabled: true
+
+  # Enable process agent for process-level metrics
+  processAgent:
+    enabled: true
+    processCollection: true
+
+  # Cluster name for grouping K8s metrics
+  clusterName: "oficina-tech-cluster"
+
+  # Tags applied to all metrics, traces and logs
+  tags:
+    - "env:production"
+    - "service:oficina-tech"
+
+agents:
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "400m"
+      memory: "512Mi"
+
+clusterAgent:
+  enabled: true
+  replicas: 1
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "200m"
+      memory: "256Mi"
+  # Enable external metrics for HPA
+  metricsProvider:
+    enabled: true

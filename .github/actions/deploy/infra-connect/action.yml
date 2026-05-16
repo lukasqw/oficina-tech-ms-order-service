@@ -56,6 +56,18 @@ outputs:
   vpc_id:
     description: 'VPC ID'
     value: ${{ steps.infra.outputs.vpc_id }}
+  sqs_customer_deleted_url:
+    description: 'SQS URL — customer-deleted (ms1 → ms2)'
+    value: ${{ steps.infra.outputs.sqs_customer_deleted_url }}
+  sqs_inventory_op_requested_url:
+    description: 'SQS URL — inventory-op-requested (ms2 → ms3)'
+    value: ${{ steps.infra.outputs.sqs_inventory_op_requested_url }}
+  sqs_inventory_op_succeeded_url:
+    description: 'SQS URL — inventory-op-succeeded (ms3 → ms2)'
+    value: ${{ steps.infra.outputs.sqs_inventory_op_succeeded_url }}
+  sqs_inventory_op_failed_url:
+    description: 'SQS URL — inventory-op-failed (ms3 → ms2)'
+    value: ${{ steps.infra.outputs.sqs_inventory_op_failed_url }}
 
 runs:
   using: composite
@@ -72,6 +84,14 @@ runs:
       id: infra
       shell: bash
       run: |
+        if [ -z "${{ inputs.infra_tfstate_s3_path }}" ]; then
+          echo "::error::INFRA_TFSTATE_S3_PATH secret is empty — configure it in GitHub repository secrets"
+          exit 1
+        fi
+        if [ -z "${{ inputs.db_tfstate_s3_path }}" ]; then
+          echo "::error::DB_TFSTATE_S3_PATH secret is empty — configure it in GitHub repository secrets"
+          exit 1
+        fi
         aws s3 cp ${{ inputs.infra_tfstate_s3_path }} /tmp/infra-state.json
         aws s3 cp ${{ inputs.db_tfstate_s3_path }} /tmp/db-state.json
 
@@ -88,6 +108,12 @@ runs:
 
         # DynamoDB table (only populated for ms2; empty for ms1 and ms3)
         DYNAMODB_TABLE=$(jq -r '.outputs.dynamodb_order_history_table_name.value // empty' /tmp/db-state.json)
+
+        # SQS queues (provisionadas em oficina-tech-infra)
+        SQS_CUSTOMER_DELETED=$(jq -r '.outputs.sqs_customer_deleted_url.value // empty' /tmp/infra-state.json)
+        SQS_INVENTORY_OP_REQUESTED=$(jq -r '.outputs.sqs_inventory_op_requested_url.value // empty' /tmp/infra-state.json)
+        SQS_INVENTORY_OP_SUCCEEDED=$(jq -r '.outputs.sqs_inventory_op_succeeded_url.value // empty' /tmp/infra-state.json)
+        SQS_INVENTORY_OP_FAILED=$(jq -r '.outputs.sqs_inventory_op_failed_url.value // empty' /tmp/infra-state.json)
 
         if [ -z "$CLUSTER_NAME" ]; then
           echo "::error::eks_cluster_name not found in infrastructure state"
@@ -109,6 +135,10 @@ runs:
         echo "dynamodb_table=$DYNAMODB_TABLE" >> $GITHUB_OUTPUT
         echo "nlb_dns=$NLB_DNS" >> $GITHUB_OUTPUT
         echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
+        echo "sqs_customer_deleted_url=$SQS_CUSTOMER_DELETED" >> $GITHUB_OUTPUT
+        echo "sqs_inventory_op_requested_url=$SQS_INVENTORY_OP_REQUESTED" >> $GITHUB_OUTPUT
+        echo "sqs_inventory_op_succeeded_url=$SQS_INVENTORY_OP_SUCCEEDED" >> $GITHUB_OUTPUT
+        echo "sqs_inventory_op_failed_url=$SQS_INVENTORY_OP_FAILED" >> $GITHUB_OUTPUT
 
         echo "::notice::Cluster: $CLUSTER_NAME"
         echo "::notice::DB key: ${{ inputs.db_ms_key }} → $RDS_ADDRESS:$RDS_PORT/$RDS_DBNAME"

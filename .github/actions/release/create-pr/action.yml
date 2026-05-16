@@ -102,16 +102,25 @@ runs:
         echo "::notice::Tag $VERSION is available"
 
     # Fail if the branch exists without a PR — orphaned state requires manual intervention.
-    - name: Guard — Release branch must not already exist
+    - name: Guard — Release branch must not already exist (auto-resolve orphaned)
       shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github_token }}
       run: |
         BRANCH="${{ steps.version.outputs.branch_name }}"
         if git ls-remote --heads origin "$BRANCH" | grep -q "$BRANCH"; then
-          echo "::error::Branch $BRANCH exists without an open PR — orphaned state detected."
-          echo "::error::Options: (1) reopen the existing PR, (2) delete the branch and re-run."
-          exit 1
+          HAS_PR=$(gh pr list --base main --head "$BRANCH" --state open --json number --jq 'length' 2>/dev/null || echo "0")
+          if [ "$HAS_PR" = "0" ]; then
+            echo "::warning::Branch $BRANCH existe sem PR aberto (estado órfão) — deletando automaticamente e continuando"
+            gh api -X DELETE "repos/${{ github.repository }}/git/refs/heads/$BRANCH"
+            echo "::notice::Branch $BRANCH deletada. Prosseguindo com nova release."
+          else
+            echo "::error::Branch $BRANCH já tem um PR aberto. Feche ou faça merge do PR existente antes de criar uma nova release para esta versão."
+            exit 1
+          fi
+        else
+          echo "::notice::Branch $BRANCH disponível"
         fi
-        echo "::notice::Branch $BRANCH is available"
 
     - name: Generate Changelog
       id: changelog

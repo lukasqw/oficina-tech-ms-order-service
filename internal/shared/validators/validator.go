@@ -13,7 +13,7 @@ var emailRegex = regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-
 
 func ValidateStruct(s interface{}) error {
 	val := reflect.ValueOf(s)
-	if val.Kind() == reflect.Ptr {
+	if val.Kind() == reflect.Pointer {
 		val = val.Elem()
 	}
 
@@ -56,7 +56,7 @@ func getFieldName(field reflect.StructField) string {
 
 func applyRule(fieldName string, fieldValue reflect.Value, rule string) error {
 	// Se for ponteiro, pega o valor apontado
-	isPointer := fieldValue.Kind() == reflect.Ptr
+	isPointer := fieldValue.Kind() == reflect.Pointer
 	if isPointer {
 		// Se for nil, não valida (campo não enviado)
 		if fieldValue.IsNil() {
@@ -273,7 +273,7 @@ func validateDive(fieldName string, fieldValue reflect.Value) error {
 		elem := fieldValue.Index(i)
 
 		// Se o elemento for um ponteiro, pega o valor apontado
-		if elem.Kind() == reflect.Ptr {
+		if elem.Kind() == reflect.Pointer {
 			if elem.IsNil() {
 				continue
 			}

@@ -100,10 +100,8 @@ func (w *World) assertSagaFailed(ctx context.Context) error {
 			}
 			// If saga returned to IDLE and status didn't advance, treat
 			// that as the failure-then-rollback path.
-			status, _ := raw["status"].(string)
-			if status == "DIAGNOSING" && (sagaStatus == "IDLE" || sagaStatus == "") {
-				// Need an actual error signal — keep polling.
-			}
+			_, _ = raw["status"].(string)
+			// raw["status"] == "DIAGNOSING" with IDLE saga — keep polling for failure signal
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
