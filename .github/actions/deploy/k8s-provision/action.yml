@@ -59,13 +59,21 @@ inputs:
     default: ''
   # Inter-service URLs
   ms1_base_url:
-    description: 'ms-identity base URL for REST calls (GET /customers, GET /vehicles)'
+    description: 'ms-identity base URL override — se vazio, deriva automaticamente de ms1_app_name'
     required: false
     default: ''
+  ms1_app_name:
+    description: 'APP_NAME do ms-identity — usado para derivar http://{name}-service:8081'
+    required: false
+    default: 'ms-identity'
   ms3_base_url:
-    description: 'ms-workshop base URL for REST calls (GET /products, GET /services)'
+    description: 'ms-workshop base URL override — se vazio, deriva automaticamente de ms3_app_name'
     required: false
     default: ''
+  ms3_app_name:
+    description: 'APP_NAME do ms-workshop — usado para derivar http://{name}-service:8083'
+    required: false
+    default: 'ms-workshop'
   # Mercado Pago
   mp_notification_url:
     description: 'Public URL for Mercado Pago webhook callbacks'
@@ -151,7 +159,19 @@ runs:
       shell: bash
       env:
         APP_NAME: ${{ inputs.app_name }}
+        MS1_BASE_URL_INPUT: ${{ inputs.ms1_base_url }}
+        MS1_APP_NAME: ${{ inputs.ms1_app_name }}
+        MS3_BASE_URL_INPUT: ${{ inputs.ms3_base_url }}
+        MS3_APP_NAME: ${{ inputs.ms3_app_name }}
       run: |
+        # Auto-derive inter-service URLs from APP_NAME if not explicitly provided
+        MS1_URL="${MS1_BASE_URL_INPUT}"
+        [ -z "$MS1_URL" ] && MS1_URL="http://${MS1_APP_NAME}-service:8081"
+        MS3_URL="${MS3_BASE_URL_INPUT}"
+        [ -z "$MS3_URL" ] && MS3_URL="http://${MS3_APP_NAME}-service:8083"
+        echo "::notice::MS1_BASE_URL=${MS1_URL}"
+        echo "::notice::MS3_BASE_URL=${MS3_URL}"
+
         cat <<EOF | kubectl apply -f -
         apiVersion: v1
         kind: ConfigMap
@@ -172,8 +192,8 @@ runs:
           ORDER_INVENTORY_OP_SUCCEEDED_QUEUE_URL: "${{ inputs.sqs_inventory_op_succeeded_url }}"
           ORDER_INVENTORY_OP_FAILED_QUEUE_URL: "${{ inputs.sqs_inventory_op_failed_url }}"
           CUSTOMER_DELETED_QUEUE_URL: "${{ inputs.sqs_customer_deleted_url }}"
-          MS1_BASE_URL: "${{ inputs.ms1_base_url }}"
-          MS3_BASE_URL: "${{ inputs.ms3_base_url }}"
+          MS1_BASE_URL: "${MS1_URL}"
+          MS3_BASE_URL: "${MS3_URL}"
           MP_NOTIFICATION_URL: "${{ inputs.mp_notification_url }}"
           SMTP_HOST: "${{ inputs.smtp_host }}"
           SMTP_PORT: "${{ inputs.smtp_port }}"
