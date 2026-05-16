@@ -13,6 +13,7 @@ permissions:
   packages: read
   id-token: write
 
+# Same concurrency group as deploy — prevents a rollback from running alongside a deploy.
 concurrency:
   group: deploy
   cancel-in-progress: false
@@ -38,6 +39,10 @@ jobs:
             exit 1
           fi
 
+      # Checkout na tag específica para que os manifests K8s e composite actions
+      # correspondam exatamente ao que foi deployado naquela versão.
+      # infra-connect NÃO é fixado na tag — lê o TF state atual do S3 para obter
+      # o cluster, RDS e NLB live.
       - name: Checkout at ${{ github.event.inputs.version }}
         uses: actions/checkout@v4
         with:
@@ -75,14 +80,22 @@ jobs:
           [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]     && MISSING+=("AWS_ACCESS_KEY_ID")
           [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ] && MISSING+=("AWS_SECRET_ACCESS_KEY")
           [ -z "${{ secrets.DB_PASSWORD }}" ]            && MISSING+=("DB_PASSWORD")
+          [ -z "${{ secrets.JWT_SECRET_KEY }}" ]         && MISSING+=("JWT_SECRET_KEY")
           [ -z "${{ secrets.GHCR_PAT }}" ]              && MISSING+=("GHCR_PAT")
           [ -z "${{ secrets.DD_API_KEY }}" ]             && MISSING+=("DD_API_KEY")
           [ -z "${{ secrets.DD_APP_KEY }}" ]             && MISSING+=("DD_APP_KEY")
+          [ -z "${{ secrets.SMTP_HOST }}" ]              && MISSING+=("SMTP_HOST")
+          [ -z "${{ secrets.SMTP_USERNAME }}" ]          && MISSING+=("SMTP_USERNAME")
+          [ -z "${{ secrets.SMTP_PASSWORD }}" ]          && MISSING+=("SMTP_PASSWORD")
+          [ -z "${{ secrets.MP_ACCESS_TOKEN }}" ]        && MISSING+=("MP_ACCESS_TOKEN")
+          [ -z "${{ secrets.MP_WEBHOOK_SECRET }}" ]      && MISSING+=("MP_WEBHOOK_SECRET")
           if [ ${#MISSING[@]} -gt 0 ]; then
             echo "::error::Required secrets missing: ${MISSING[*]}"
             exit 1
           fi
 
+      # Reads current TF state from S3 — always reflects the live infrastructure,
+      # regardless of which application version we are rolling back to.
       - name: Connect to Infrastructure
         id: infra
         uses: ./.github/actions/deploy/infra-connect
@@ -93,6 +106,7 @@ jobs:
           aws_region: ${{ env.AWS_REGION }}
           infra_tfstate_s3_path: ${{ vars.INFRA_TFSTATE_S3_PATH }}
           db_tfstate_s3_path: ${{ vars.DB_TFSTATE_S3_PATH }}
+          db_ms_key: ms2
 
       - name: Provision Kubernetes Resources
         uses: ./.github/actions/deploy/k8s-provision
@@ -100,11 +114,20 @@ jobs:
           app_name: ${{ vars.APP_NAME }}
           namespace: ${{ env.K8S_NAMESPACE }}
           version: ${{ github.event.inputs.version }}
-          server_port: ${{ vars.SERVER_PORT || '8080' }}
+          server_port: ${{ vars.SERVER_PORT || '8082' }}
           rds_address: ${{ steps.infra.outputs.rds_address }}
           rds_port: ${{ steps.infra.outputs.rds_port }}
           rds_dbname: ${{ steps.infra.outputs.rds_dbname }}
           rds_user: ${{ steps.infra.outputs.rds_user }}
+          aws_region: ${{ env.AWS_REGION }}
+          dynamodb_table: ${{ steps.infra.outputs.dynamodb_table }}
+          sqs_inventory_op_requested_url: ${{ vars.SQS_INVENTORY_OP_REQUESTED_URL }}
+          sqs_inventory_op_succeeded_url: ${{ vars.SQS_INVENTORY_OP_SUCCEEDED_URL }}
+          sqs_inventory_op_failed_url: ${{ vars.SQS_INVENTORY_OP_FAILED_URL }}
+          sqs_customer_deleted_url: ${{ vars.SQS_CUSTOMER_DELETED_URL }}
+          ms1_base_url: ${{ vars.MS1_BASE_URL }}
+          ms3_base_url: ${{ vars.MS3_BASE_URL }}
+          mp_notification_url: ${{ vars.MP_NOTIFICATION_URL }}
           db_password: ${{ secrets.DB_PASSWORD }}
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           smtp_host: ${{ secrets.SMTP_HOST }}
@@ -112,12 +135,16 @@ jobs:
           smtp_username: ${{ secrets.SMTP_USERNAME }}
           smtp_from: ${{ secrets.SMTP_FROM }}
           smtp_password: ${{ secrets.SMTP_PASSWORD }}
+          mp_access_token: ${{ secrets.MP_ACCESS_TOKEN }}
+          mp_webhook_secret: ${{ secrets.MP_WEBHOOK_SECRET }}
           ghcr_pat: ${{ secrets.GHCR_PAT }}
           github_actor: ${{ github.actor }}
           dd_api_key: ${{ secrets.DD_API_KEY }}
           dd_app_key: ${{ secrets.DD_APP_KEY }}
           dd_site: ${{ secrets.DD_SITE }}
 
+      # Applies K8s manifests from the tag and sets the image to the target version.
+      # The image ghcr.io/{repo}:{version} must already exist — no build happens here.
       - name: Deploy Application at ${{ github.event.inputs.version }}
         uses: ./.github/actions/deploy/k8s-application
         with:
@@ -127,7 +154,7 @@ jobs:
           registry: ${{ env.REGISTRY }}
           image_name: ${{ env.IMAGE_NAME }}
           nlb_dns: ${{ steps.infra.outputs.nlb_dns }}
-          server_port: ${{ vars.SERVER_PORT || '8080' }}
+          server_port: ${{ vars.SERVER_PORT || '8082' }}
           health_endpoint: ${{ vars.HEALTH_ENDPOINT || '/health' }}
 
       - name: Rollback Summary
