@@ -120,7 +120,7 @@ func (w *World) assertInventoryReserved(ctx context.Context, expected int) error
 	return fmt.Errorf("expected reserved >= %d, never reached on product %s", expected, w.ProductID)
 }
 
-func (w *World) assertInventoryDecreased(ctx context.Context, qty int) error {
+func (w *World) assertInventoryDecreased(ctx context.Context, _ int) error {
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		inv, err := w.fetchInventory(ctx)
