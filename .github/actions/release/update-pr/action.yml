@@ -62,29 +62,29 @@ runs:
           CHANGELOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:"- %s (%h)")
         fi
 
-        cat > /tmp/pr_body.md << PRBODY
-## Release $VERSION
-
-Automated release from \`$SOURCE_BRANCH\` branch.
-**Last updated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')
-
-### Changelog
-$CHANGELOG
-
-### Checklist
-- [ ] Review changes
-- [ ] Validate all tests passed
-- [ ] Check documentation updates
-- [ ] Ready to deploy
-
-### After Merge
-- Release tag \`$VERSION\` will be created automatically
-- Docker image will be published to GHCR
-- GitHub Release will be created
-
----
-*This PR is updated automatically on every push to \`$SOURCE_BRANCH\`. Mark as ready for review when all checks pass.*
-PRBODY
+        {
+          echo "## Release $VERSION"
+          echo ""
+          echo "Automated release from \`$SOURCE_BRANCH\` branch."
+          echo "**Last updated:** $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo ""
+          echo "### Changelog"
+          echo "$CHANGELOG"
+          echo ""
+          echo "### Checklist"
+          echo "- [ ] Review changes"
+          echo "- [ ] Validate all tests passed"
+          echo "- [ ] Check documentation updates"
+          echo "- [ ] Ready to deploy"
+          echo ""
+          echo "### After Merge"
+          echo "- Release tag \`$VERSION\` will be created automatically"
+          echo "- Docker image will be published to GHCR"
+          echo "- GitHub Release will be created"
+          echo ""
+          echo "---"
+          echo "*This PR is updated automatically on every push to \`$SOURCE_BRANCH\`. Mark as ready for review when all checks pass.*"
+        } > /tmp/pr_body.md
 
         gh pr edit ${{ inputs.pr_number }} --body-file /tmp/pr_body.md
         echo "::notice::PR #${{ inputs.pr_number }} changelog updated"

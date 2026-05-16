@@ -21,15 +21,7 @@ func Load(ctx context.Context) (aws.Config, error) {
 	if endpointURL != "" {
 		opts = append(opts,
 			config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider("test", "test", "")),
-			config.WithEndpointResolverWithOptions(aws.EndpointResolverWithOptionsFunc(
-				func(service, region string, options ...interface{}) (aws.Endpoint, error) {
-					return aws.Endpoint{
-						URL:               endpointURL,
-						SigningRegion:     region,
-						HostnameImmutable: true,
-					}, nil
-				},
-			)),
+			config.WithBaseEndpoint(endpointURL),
 		)
 	}
 

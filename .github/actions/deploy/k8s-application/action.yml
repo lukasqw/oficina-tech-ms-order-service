@@ -46,15 +46,16 @@ runs:
         VERSION: ${{ inputs.version }}
         REGISTRY: ${{ inputs.registry }}
         IMAGE_NAME: ${{ inputs.image_name }}
+        SERVER_PORT: ${{ inputs.server_port }}
       run: |
         IMAGE_TAG="${VERSION#v}"
         IMAGE="${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}"
         DEPLOYMENT="${APP_NAME}-deployment"
         echo "::notice::Deploying image: $IMAGE"
 
-        kubectl apply -f k8s/service.yaml
-        kubectl apply -f k8s/deployment.yaml
-        kubectl apply -f k8s/hpa.yaml
+        envsubst < k8s/service.yaml    | kubectl apply -f -
+        envsubst < k8s/deployment.yaml | kubectl apply -f -
+        envsubst < k8s/hpa.yaml        | kubectl apply -f -
 
         kubectl set image "deployment/$DEPLOYMENT" \
           "$APP_NAME=$IMAGE" -n "$NAMESPACE"
@@ -153,10 +154,13 @@ runs:
           exit 1
         fi
 
-        POD=$(kubectl get pods -n "$NAMESPACE" -l "app=$APP_NAME" \
-          -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "")
+        # Exclude terminating pods (deletionTimestamp set) — rolling update leaves old pods
+        # in Ready+Terminating state which causes Connection refused on health check
+        POD=$(kubectl get pods -n "$NAMESPACE" -l "app=$APP_NAME" -o json 2>/dev/null \
+          | jq -r '[.items[] | select(.metadata.deletionTimestamp == null)] | first | .metadata.name // empty')
         if [ -z "$POD" ]; then
-          echo "::error::No pods found after rollout"
+          echo "::error::No running (non-terminating) pods found after rollout"
+          kubectl get pods -n "$NAMESPACE" -o wide
           exit 1
         fi
 

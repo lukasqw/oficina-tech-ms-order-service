@@ -1,8 +1,8 @@
 name: 'Deploy — Connect to Infrastructure'
 description: >
   Configures AWS credentials, reads Terraform state from S3 to discover
-  infrastructure outputs (EKS cluster, RDS, NLB), and configures kubectl
-  to access the EKS cluster.
+  infrastructure outputs (EKS cluster, per-MS RDS, NLB), and configures
+  kubectl to access the EKS cluster.
 
 inputs:
   aws_access_key_id:
@@ -18,13 +18,16 @@ inputs:
     description: 'AWS region (e.g. us-east-1)'
     required: true
   infra_tfstate_s3_path:
-    description: 'S3 path to the infrastructure Terraform state (e.g. s3://bucket/infra/terraform.tfstate)'
+    description: 'S3 path to the infrastructure Terraform state'
     required: true
   db_tfstate_s3_path:
-    description: 'S3 path to the database Terraform state (e.g. s3://bucket/db/terraform.tfstate)'
+    description: 'S3 path to the database Terraform state'
+    required: true
+  db_ms_key:
+    description: 'Microservice DB key to read from TF state: ms1 (identity), ms2 (order), ms3 (workshop)'
     required: true
   kubectl_version:
-    description: 'kubectl version to install — pin to avoid fetching latest on every run'
+    description: 'kubectl version to install'
     required: false
     default: 'v1.31.0'
 
@@ -33,23 +36,38 @@ outputs:
     description: 'EKS cluster name'
     value: ${{ steps.infra.outputs.cluster_name }}
   rds_address:
-    description: 'RDS endpoint address'
+    description: 'RDS endpoint address for this microservice'
     value: ${{ steps.infra.outputs.rds_address }}
   rds_port:
     description: 'RDS port'
     value: ${{ steps.infra.outputs.rds_port }}
   rds_dbname:
-    description: 'RDS database name'
+    description: 'RDS database name for this microservice'
     value: ${{ steps.infra.outputs.rds_dbname }}
   rds_user:
-    description: 'RDS username'
+    description: 'RDS username for this microservice'
     value: ${{ steps.infra.outputs.rds_user }}
+  dynamodb_table:
+    description: 'DynamoDB order_history table name (populated for ms2, empty for ms1/ms3)'
+    value: ${{ steps.infra.outputs.dynamodb_table }}
   nlb_dns:
     description: 'Network Load Balancer DNS name'
     value: ${{ steps.infra.outputs.nlb_dns }}
   vpc_id:
     description: 'VPC ID'
     value: ${{ steps.infra.outputs.vpc_id }}
+  sqs_customer_deleted_url:
+    description: 'SQS URL — customer-deleted (ms1 → ms2)'
+    value: ${{ steps.infra.outputs.sqs_customer_deleted_url }}
+  sqs_inventory_op_requested_url:
+    description: 'SQS URL — inventory-op-requested (ms2 → ms3)'
+    value: ${{ steps.infra.outputs.sqs_inventory_op_requested_url }}
+  sqs_inventory_op_succeeded_url:
+    description: 'SQS URL — inventory-op-succeeded (ms3 → ms2)'
+    value: ${{ steps.infra.outputs.sqs_inventory_op_succeeded_url }}
+  sqs_inventory_op_failed_url:
+    description: 'SQS URL — inventory-op-failed (ms3 → ms2)'
+    value: ${{ steps.infra.outputs.sqs_inventory_op_failed_url }}
 
 runs:
   using: composite
@@ -66,6 +84,14 @@ runs:
       id: infra
       shell: bash
       run: |
+        if [ -z "${{ inputs.infra_tfstate_s3_path }}" ]; then
+          echo "::error::INFRA_TFSTATE_S3_PATH secret is empty — configure it in GitHub repository secrets"
+          exit 1
+        fi
+        if [ -z "${{ inputs.db_tfstate_s3_path }}" ]; then
+          echo "::error::DB_TFSTATE_S3_PATH secret is empty — configure it in GitHub repository secrets"
+          exit 1
+        fi
         aws s3 cp ${{ inputs.infra_tfstate_s3_path }} /tmp/infra-state.json
         aws s3 cp ${{ inputs.db_tfstate_s3_path }} /tmp/db-state.json
 
@@ -73,19 +99,31 @@ runs:
         NLB_DNS=$(jq -r '.outputs.nlb_dns_name.value // empty' /tmp/infra-state.json)
         VPC_ID=$(jq -r '.outputs.vpc_id.value // empty' /tmp/infra-state.json)
 
-        RDS_ADDRESS=$(jq -r '.outputs.rds_address.value // empty' /tmp/db-state.json)
-        RDS_PORT=$(jq -r '.outputs.rds_port.value // "5432"' /tmp/db-state.json)
-        RDS_DBNAME=$(jq -r '.outputs.rds_database_name.value // "oficina_tech"' /tmp/db-state.json)
-        RDS_USER=$(jq -r '.outputs.rds_username.value // "postgres"' /tmp/db-state.json)
+        # Per-MS RDS outputs: rds_ms1_address, rds_ms2_address, rds_ms3_address etc.
+        # ${{ inputs.db_ms_key }} is expanded by GitHub Actions before bash runs.
+        RDS_ADDRESS=$(jq -r '.outputs.rds_${{ inputs.db_ms_key }}_address.value // empty' /tmp/db-state.json)
+        RDS_PORT=$(jq -r '.outputs.rds_${{ inputs.db_ms_key }}_port.value // "5432"' /tmp/db-state.json)
+        RDS_DBNAME=$(jq -r '.outputs.rds_${{ inputs.db_ms_key }}_database_name.value // empty' /tmp/db-state.json)
+        RDS_USER=$(jq -r '.outputs.rds_${{ inputs.db_ms_key }}_username.value // "postgres"' /tmp/db-state.json)
+
+        # DynamoDB table (only populated for ms2; empty for ms1 and ms3)
+        DYNAMODB_TABLE=$(jq -r '.outputs.dynamodb_order_history_table_name.value // empty' /tmp/db-state.json)
+
+        # SQS queues (provisionadas em oficina-tech-infra)
+        SQS_CUSTOMER_DELETED=$(jq -r '.outputs.sqs_customer_deleted_url.value // empty' /tmp/infra-state.json)
+        SQS_INVENTORY_OP_REQUESTED=$(jq -r '.outputs.sqs_inventory_op_requested_url.value // empty' /tmp/infra-state.json)
+        SQS_INVENTORY_OP_SUCCEEDED=$(jq -r '.outputs.sqs_inventory_op_succeeded_url.value // empty' /tmp/infra-state.json)
+        SQS_INVENTORY_OP_FAILED=$(jq -r '.outputs.sqs_inventory_op_failed_url.value // empty' /tmp/infra-state.json)
 
         if [ -z "$CLUSTER_NAME" ]; then
           echo "::error::eks_cluster_name not found in infrastructure state"
-          echo "::error::Ensure the infrastructure project has been applied first"
+          echo "::error::Ensure oficina-tech-infra has been applied first"
           exit 1
         fi
 
         if [ -z "$RDS_ADDRESS" ]; then
-          echo "::error::rds_address not found in database state"
+          echo "::error::rds_${{ inputs.db_ms_key }}_address not found in database state"
+          echo "::error::Ensure oficina-tech-db has been applied and db_ms_key='${{ inputs.db_ms_key }}' is correct"
           exit 1
         fi
 
@@ -94,11 +132,16 @@ runs:
         echo "rds_port=$RDS_PORT" >> $GITHUB_OUTPUT
         echo "rds_dbname=$RDS_DBNAME" >> $GITHUB_OUTPUT
         echo "rds_user=$RDS_USER" >> $GITHUB_OUTPUT
+        echo "dynamodb_table=$DYNAMODB_TABLE" >> $GITHUB_OUTPUT
         echo "nlb_dns=$NLB_DNS" >> $GITHUB_OUTPUT
         echo "vpc_id=$VPC_ID" >> $GITHUB_OUTPUT
+        echo "sqs_customer_deleted_url=$SQS_CUSTOMER_DELETED" >> $GITHUB_OUTPUT
+        echo "sqs_inventory_op_requested_url=$SQS_INVENTORY_OP_REQUESTED" >> $GITHUB_OUTPUT
+        echo "sqs_inventory_op_succeeded_url=$SQS_INVENTORY_OP_SUCCEEDED" >> $GITHUB_OUTPUT
+        echo "sqs_inventory_op_failed_url=$SQS_INVENTORY_OP_FAILED" >> $GITHUB_OUTPUT
 
         echo "::notice::Cluster: $CLUSTER_NAME"
-        echo "::notice::RDS: $RDS_ADDRESS:$RDS_PORT/$RDS_DBNAME"
+        echo "::notice::DB key: ${{ inputs.db_ms_key }} → $RDS_ADDRESS:$RDS_PORT/$RDS_DBNAME"
         echo "::notice::NLB DNS: $NLB_DNS"
 
     - name: Setup kubectl

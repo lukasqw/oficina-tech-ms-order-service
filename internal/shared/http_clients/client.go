@@ -17,10 +17,6 @@ const (
 	maxAttempts    = 3
 )
 
-type envelope[T any] struct {
-	Data   T             `json:"data"`
-	Errors []errorDetail `json:"errors"`
-}
 
 type errorDetail struct {
 	Code    string `json:"code"`
@@ -90,18 +86,18 @@ func (c restClient) doGet(ctx context.Context, path string, output any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return ErrNotFound
 	case http.StatusUnauthorized:
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		return ErrUnauthorized
 	default:
-		io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, resp.Body)
 		if resp.StatusCode >= 500 {
 			return retryableStatusError{status: resp.StatusCode}
 		}

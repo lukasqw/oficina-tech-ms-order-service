@@ -42,10 +42,12 @@ runs:
       id: changelog
       shell: bash
       run: |
-        PREV_TAG=$(git describe --tags --sort=-v:refname --abbrev=0 \
-          $(git rev-list --tags --skip=1 --max-count=1) 2>/dev/null || echo "")
+        CURRENT="${{ inputs.version }}"
+        # sed -n '1p' consumes the full pipe without triggering SIGPIPE (unlike head -1)
+        PREV_TAG=$(git tag --sort=-v:refname 2>/dev/null \
+          | { grep -v "^${CURRENT}$" || true; } | sed -n '1p')
         if [ -z "$PREV_TAG" ]; then
-          CHANGELOG=$(git log --pretty=format:"- %s (%h)" | head -20)
+          CHANGELOG=$(git log --pretty=format:"- %s (%h)" -20)
         else
           CHANGELOG=$(git log "${PREV_TAG}..HEAD" --pretty=format:"- %s (%h)")
         fi

@@ -50,7 +50,7 @@ func doJSON(ctx context.Context, w *World, method, url string, body any, token s
 	if err != nil {
 		return 0, nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {

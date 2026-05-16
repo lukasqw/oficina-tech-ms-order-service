@@ -1,47 +1,79 @@
-name: 'Deploy — Provision Kubernetes Resources'
+name: 'Deploy — Provision Kubernetes Resources (ms-order-service)'
 description: >
-  Creates the namespace, ConfigMap, application secrets and deploys the
-  Datadog Agent via Helm. All operations are idempotent — safe to run on
-  every deploy.
+  Creates namespace, ConfigMap, Secrets and Datadog Agent for ms-order-service.
+  All operations are idempotent — safe to run on every deploy.
 
 inputs:
   app_name:
-    description: 'Application name — used to derive Kubernetes resource names (e.g. oficina-tech)'
+    description: 'Application name'
     required: true
   namespace:
     description: 'Kubernetes namespace'
     required: true
   version:
-    description: 'Application version (e.g. v1.2.0) — written to APP_VERSION in ConfigMap'
+    description: 'Application version'
     required: true
   server_port:
     description: 'Port the application listens on'
     required: false
-    default: '8080'
-  # Database (discovered from Terraform state)
+    default: '8082'
+  # Database
   rds_address:
-    description: 'RDS endpoint address'
+    description: 'RDS endpoint address (db_ms2)'
     required: true
   rds_port:
     description: 'RDS port'
     required: true
   rds_dbname:
-    description: 'RDS database name'
+    description: 'RDS database name (db_ms2)'
     required: true
   rds_user:
     description: 'RDS username'
     required: true
-  # Application secrets
-  db_password:
-    description: 'Database password'
-    required: true
-  jwt_secret_key:
-    description: 'JWT signing secret'
+  # AWS
+  aws_region:
+    description: 'AWS region for SQS/DynamoDB'
     required: false
-    default: 'default-jwt-secret-key-change-me-32chars'
-  # SMTP (optional)
+    default: 'us-east-1'
+  # DynamoDB
+  dynamodb_table:
+    description: 'DynamoDB order_history table name'
+    required: false
+    default: 'order_history'
+  # SQS
+  sqs_inventory_op_requested_url:
+    description: 'SQS queue URL — order-inventory-op-requested (MS2 publishes → MS3)'
+    required: false
+    default: ''
+  sqs_inventory_op_succeeded_url:
+    description: 'SQS queue URL — order-inventory-op-succeeded (MS3 → MS2)'
+    required: false
+    default: ''
+  sqs_inventory_op_failed_url:
+    description: 'SQS queue URL — order-inventory-op-failed (MS3 → MS2)'
+    required: false
+    default: ''
+  sqs_customer_deleted_url:
+    description: 'SQS queue URL — customer-deleted (MS1 → MS2)'
+    required: false
+    default: ''
+  # Inter-service URLs
+  ms1_base_url:
+    description: 'ms-identity base URL for REST calls (GET /customers, GET /vehicles)'
+    required: false
+    default: ''
+  ms3_base_url:
+    description: 'ms-workshop base URL for REST calls (GET /products, GET /services)'
+    required: false
+    default: ''
+  # Mercado Pago
+  mp_notification_url:
+    description: 'Public URL for Mercado Pago webhook callbacks'
+    required: false
+    default: ''
+  # SMTP
   smtp_host:
-    description: 'SMTP host'
+    description: 'SMTP host for email notifications'
     required: false
     default: 'smtp.gmail.com'
   smtp_port:
@@ -56,8 +88,34 @@ inputs:
     description: 'SMTP from address'
     required: false
     default: ''
+  # Application secrets
+  db_password:
+    description: 'Database password'
+    required: true
+  jwt_secret_key:
+    description: 'JWT signing secret (shared across all MSs)'
+    required: true
+  # AWS credentials — required for SQS/SNS access from pods
+  aws_access_key_id:
+    description: 'AWS Access Key ID'
+    required: true
+  aws_secret_access_key:
+    description: 'AWS Secret Access Key'
+    required: true
+  aws_session_token:
+    description: 'AWS Session Token (temporary credentials)'
+    required: false
+    default: ''
   smtp_password:
     description: 'SMTP password'
+    required: false
+    default: ''
+  mp_access_token:
+    description: 'Mercado Pago access token'
+    required: false
+    default: ''
+  mp_webhook_secret:
+    description: 'Mercado Pago webhook signature secret'
     required: false
     default: ''
   # Registry pull secret
@@ -65,7 +123,7 @@ inputs:
     description: 'GitHub Container Registry personal access token'
     required: true
   github_actor:
-    description: 'GitHub actor (github.actor) — used as docker registry username'
+    description: 'GitHub actor'
     required: true
   # Datadog
   dd_api_key:
@@ -78,7 +136,7 @@ inputs:
     description: 'Datadog site (e.g. datadoghq.com)'
     required: true
   datadog_chart_version:
-    description: 'Datadog Helm chart version to install (e.g. 3.75.0). Pin this to avoid unintended upgrades.'
+    description: 'Datadog Helm chart version'
     required: false
     default: '3.75.0'
 
@@ -108,6 +166,15 @@ runs:
           SERVER_PORT: "${{ inputs.server_port }}"
           APP_ENV: "production"
           APP_VERSION: "${{ inputs.version }}"
+          AWS_REGION: "${{ inputs.aws_region }}"
+          DYNAMODB_TABLE_ORDER_HISTORY: "${{ inputs.dynamodb_table }}"
+          ORDER_INVENTORY_OP_REQUESTED_QUEUE_URL: "${{ inputs.sqs_inventory_op_requested_url }}"
+          ORDER_INVENTORY_OP_SUCCEEDED_QUEUE_URL: "${{ inputs.sqs_inventory_op_succeeded_url }}"
+          ORDER_INVENTORY_OP_FAILED_QUEUE_URL: "${{ inputs.sqs_inventory_op_failed_url }}"
+          CUSTOMER_DELETED_QUEUE_URL: "${{ inputs.sqs_customer_deleted_url }}"
+          MS1_BASE_URL: "${{ inputs.ms1_base_url }}"
+          MS3_BASE_URL: "${{ inputs.ms3_base_url }}"
+          MP_NOTIFICATION_URL: "${{ inputs.mp_notification_url }}"
           SMTP_HOST: "${{ inputs.smtp_host }}"
           SMTP_PORT: "${{ inputs.smtp_port }}"
           SMTP_USERNAME: "${{ inputs.smtp_username }}"
@@ -120,7 +187,6 @@ runs:
       env:
         APP_NAME: ${{ inputs.app_name }}
       run: |
-        # Image pull secret for GitHub Container Registry
         kubectl create secret docker-registry ghcr-secret \
           --docker-server=ghcr.io \
           --docker-username=${{ inputs.github_actor }} \
@@ -129,15 +195,18 @@ runs:
           -n ${{ inputs.namespace }} \
           --dry-run=client -o yaml | kubectl apply -f -
 
-        # Application secrets
         kubectl create secret generic "$APP_NAME-secret" \
           --from-literal=DB_PASSWORD=${{ inputs.db_password }} \
           --from-literal=JWT_SECRET_KEY=${{ inputs.jwt_secret_key }} \
           --from-literal=SMTP_PASSWORD=${{ inputs.smtp_password }} \
+          --from-literal=MP_ACCESS_TOKEN=${{ inputs.mp_access_token }} \
+          --from-literal=MP_WEBHOOK_SECRET=${{ inputs.mp_webhook_secret }} \
+          --from-literal=AWS_ACCESS_KEY_ID=${{ inputs.aws_access_key_id }} \
+          --from-literal=AWS_SECRET_ACCESS_KEY=${{ inputs.aws_secret_access_key }} \
+          --from-literal=AWS_SESSION_TOKEN=${{ inputs.aws_session_token }} \
           -n ${{ inputs.namespace }} \
           --dry-run=client -o yaml | kubectl apply -f -
 
-        # Datadog Agent secret (referenced by Helm chart)
         kubectl create secret generic datadog-secret \
           --from-literal=api-key=${{ inputs.dd_api_key }} \
           --from-literal=app-key=${{ inputs.dd_app_key }} \
@@ -160,16 +229,13 @@ runs:
         TARGET="datadog-${CHART_VERSION}"
 
         if [ "$INSTALLED" == "$TARGET" ]; then
-          echo "::notice::Datadog $CHART_VERSION already installed — skipping helm upgrade"
+          echo "::notice::Datadog $CHART_VERSION already installed — skipping"
         else
-          echo "::notice::Installing/upgrading Datadog: $INSTALLED → $TARGET"
-          # apiKeyExistingSecret and appKeyExistingSecret are configured in values.yaml
           helm upgrade --install datadog datadog/datadog \
             --namespace "$NAMESPACE" \
             --version "$CHART_VERSION" \
             -f k8s/datadog/values.yaml \
             --set datadog.site="$DD_SITE" \
-            --wait \
-            --timeout 10m
+            --wait --timeout 10m
           echo "::notice::Datadog Agent deployed"
         fi

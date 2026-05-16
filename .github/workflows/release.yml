@@ -1,4 +1,4 @@
-name: Create Release
+﻿name: Create Release
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: 'Release type — push auto-detects from conventional commits; this input is only used on workflow_dispatch'
+        description: 'Release type â€” push auto-detects from conventional commits; this input is only used on workflow_dispatch'
         required: true
         type: choice
         options:
@@ -15,6 +15,11 @@ on:
           - minor
           - major
         default: 'minor'
+      force_reset:
+        description: 'Delete orphaned release/* branches (no open PR) before creating a new release. Use when a deploy failed and the branch is stuck.'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -59,7 +64,7 @@ jobs:
             echo "::notice::Open release PR found: #$PR_NUMBER ($PR_BRANCH)"
           else
             echo "has_open_pr=false" >> $GITHUB_OUTPUT
-            echo "::notice::No open release PR — will create a new release"
+            echo "::notice::No open release PR â€” will create a new release"
           fi
 
       - name: Update existing release PR
