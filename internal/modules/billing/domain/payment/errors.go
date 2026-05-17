@@ -8,4 +8,8 @@ var (
 	ErrInvalidWebhookSignature = errors.New("assinatura do Mercado Pago inválida")
 	ErrMalformedWebhook        = errors.New("webhook do Mercado Pago malformado")
 	ErrPaymentURLNotAvailable  = errors.New("URL de pagamento não encontrada")
+	ErrOrderNotFound           = errors.New("order não encontrado no Mercado Pago")
+	ErrOrderCreationFailed     = errors.New("falha ao criar order no Mercado Pago")
+	ErrOrderNotCancellable     = errors.New("order não pode ser cancelado: já está em estado final")
+	ErrOrderNotRefundable      = errors.New("order não pode ser estornado: pagamento não confirmado")
 )
