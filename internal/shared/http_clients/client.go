@@ -9,6 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
+	"go.opentelemetry.io/otel/trace"
+
 	"oficina-tech/internal/shared/infra/http/middleware"
 )
 
@@ -74,38 +80,65 @@ func shouldRetry(err error) bool {
 }
 
 func (c restClient) doGet(ctx context.Context, path string, output any) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
+	url := c.baseURL + path
+
+	ctx, span := otel.Tracer("oficina-tech/http-client").Start(ctx, "HTTP GET "+path,
+		trace.WithSpanKind(trace.SpanKindClient),
+		trace.WithAttributes(
+			semconv.HTTPRequestMethodKey.String(http.MethodGet),
+			semconv.URLFull(url),
+			semconv.ServerAddress(c.baseURL),
+		),
+	)
+	defer span.End()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 	if authorization, ok := ctx.Value(middleware.AuthorizationKey).(string); ok && authorization != "" {
 		req.Header.Set("Authorization", authorization)
 	}
+	// Injeta traceparent/tracestate no header para que o MS de destino
+	// continue o mesmo trace (W3C Trace Context propagation).
+	otel.GetTextMapPropagator().Inject(ctx, propagation.HeaderCarrier(req.Header))
 
 	resp, err := c.client.Do(req)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
+
+	span.SetAttributes(semconv.HTTPResponseStatusCode(resp.StatusCode))
 
 	switch resp.StatusCode {
 	case http.StatusOK:
 	case http.StatusNotFound:
 		_, _ = io.Copy(io.Discard, resp.Body)
+		span.SetStatus(codes.Error, "not found")
 		return ErrNotFound
 	case http.StatusUnauthorized:
 		_, _ = io.Copy(io.Discard, resp.Body)
+		span.SetStatus(codes.Error, "unauthorized")
 		return ErrUnauthorized
 	default:
 		_, _ = io.Copy(io.Discard, resp.Body)
 		if resp.StatusCode >= 500 {
+			span.SetStatus(codes.Error, fmt.Sprintf("upstream %d", resp.StatusCode))
 			return retryableStatusError{status: resp.StatusCode}
 		}
+		span.SetStatus(codes.Error, fmt.Sprintf("upstream %d", resp.StatusCode))
 		return fmt.Errorf("upstream returned status %d", resp.StatusCode)
 	}
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 
