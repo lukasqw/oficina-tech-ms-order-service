@@ -103,7 +103,8 @@ func (o *Orchestrator) CancelOrder(ctx context.Context, orderID string, notes *s
 		return &StartResult{Order: order, Async: false}, nil
 	case service_order.StatusPendingAuthorization, service_order.StatusAuthorized, service_order.StatusInProgress:
 		return o.StartSaga(ctx, orderID, dto.StockOpCancelReserved, service_order.StatusCanceled, notes)
-	case service_order.StatusCompleted, service_order.StatusAwaitingPayment, service_order.StatusPaid:
+	case service_order.StatusCompleted, service_order.StatusAwaitingPayment,
+		service_order.StatusPaymentRejected, service_order.StatusPaid:
 		return o.StartSaga(ctx, orderID, dto.StockOpCancelConfirmed, service_order.StatusCanceled, notes)
 	default:
 		return nil, service_order.ErrInvalidStatusTransition

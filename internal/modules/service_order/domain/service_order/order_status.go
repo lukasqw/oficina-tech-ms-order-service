@@ -10,6 +10,7 @@ const (
 	StatusInProgress           OrderStatus = "IN_PROGRESS"
 	StatusCompleted            OrderStatus = "COMPLETED"
 	StatusAwaitingPayment      OrderStatus = "AWAITING_PAYMENT"
+	StatusPaymentRejected      OrderStatus = "PAYMENT_REJECTED"
 	StatusPaid                 OrderStatus = "PAID"
 	StatusDelivered            OrderStatus = "DELIVERED"
 	StatusCanceled             OrderStatus = "CANCELED"
@@ -30,8 +31,8 @@ func (s OrderStatus) IsValid() bool {
 	switch s {
 	case StatusReceived, StatusDiagnosing, StatusPendingAuthorization,
 		StatusAuthorized, StatusInProgress, StatusCompleted,
-		StatusAwaitingPayment, StatusPaid, StatusDelivered, StatusCanceled,
-		StatusAuthorizationDenied:
+		StatusAwaitingPayment, StatusPaymentRejected, StatusPaid,
+		StatusDelivered, StatusCanceled, StatusAuthorizationDenied:
 		return true
 	}
 	return false
@@ -44,22 +45,23 @@ func (s OrderStatus) String() string {
 
 // CanTransitionTo valida se a transição para o novo status é permitida
 func (s OrderStatus) CanTransitionTo(newStatus OrderStatus) bool {
-	// Cancelamentos compensatórios podem acontecer depois de COMPLETED/PAID.
+	// Cancelamentos compensatórios são permitidos de qualquer estado não terminal,
+	// exceto dos próprios terminais.
 	if newStatus == StatusCanceled {
 		return s != StatusDelivered && s != StatusCanceled && s != StatusAuthorizationDenied
 	}
 
-	// Status finais não podem transicionar para nenhum outro status
+	// Status finais não podem transicionar para nenhum outro status.
 	if s == StatusDelivered || s == StatusCanceled || s == StatusAuthorizationDenied {
 		return false
 	}
 
-	// AUTHORIZATION_DENIED só pode ser alcançado de PENDING_AUTHORIZATION
+	// AUTHORIZATION_DENIED só pode ser alcançado de PENDING_AUTHORIZATION.
 	if newStatus == StatusAuthorizationDenied {
 		return s == StatusPendingAuthorization
 	}
 
-	// Mapa de transições válidas do fluxo normal
+	// Mapa de transições válidas do fluxo normal.
 	validTransitions := map[OrderStatus][]OrderStatus{
 		StatusReceived: {
 			StatusDiagnosing,
@@ -81,8 +83,12 @@ func (s OrderStatus) CanTransitionTo(newStatus OrderStatus) bool {
 		},
 		StatusAwaitingPayment: {
 			StatusPaid,
-			StatusCompleted,
-			StatusCanceled,
+			StatusPaymentRejected,
+		},
+		// PAYMENT_REJECTED: retry gera novo order MP e volta para AWAITING_PAYMENT;
+		// cancelamento explícito (com refund) vai para CANCELED (tratado acima).
+		StatusPaymentRejected: {
+			StatusAwaitingPayment,
 		},
 		StatusPaid: {
 			StatusDelivered,
@@ -123,7 +129,7 @@ func (s OrderStatus) NextStatus() (OrderStatus, error) {
 		return StatusPaid, nil
 	case StatusPaid:
 		return StatusDelivered, nil
-	case StatusDelivered, StatusCanceled, StatusAuthorizationDenied:
+	case StatusDelivered, StatusCanceled, StatusAuthorizationDenied, StatusPaymentRejected:
 		return "", ErrNoNextStatus
 	default:
 		return "", ErrInvalidStatus

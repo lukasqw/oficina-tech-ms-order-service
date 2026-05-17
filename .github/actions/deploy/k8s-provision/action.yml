@@ -79,6 +79,10 @@ inputs:
     description: 'Public URL for Mercado Pago webhook callbacks'
     required: false
     default: ''
+  mp_callback_base_url:
+    description: 'Base public URL of MS2 for MP redirect callbacks (success/pending/failure)'
+    required: false
+    default: ''
   # SMTP
   smtp_host:
     description: 'SMTP host for email notifications'
@@ -196,6 +200,7 @@ runs:
           MS1_BASE_URL: "${MS1_URL}"
           MS3_BASE_URL: "${MS3_URL}"
           MP_NOTIFICATION_URL: "${{ inputs.mp_notification_url }}"
+          MP_CALLBACK_BASE_URL: "${{ inputs.mp_callback_base_url }}"
           SMTP_HOST: "${{ inputs.smtp_host }}"
           SMTP_PORT: "${{ inputs.smtp_port }}"
           SMTP_USERNAME: "${{ inputs.smtp_username }}"

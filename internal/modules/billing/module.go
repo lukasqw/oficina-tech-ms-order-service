@@ -1,6 +1,7 @@
 package billing
 
 import (
+	"log"
 	"os"
 
 	"oficina-tech/internal/modules/billing/application/usecases"
@@ -14,9 +15,12 @@ import (
 type Module struct {
 	MercadoPagoClient    payment.MercadoPagoClient
 	SignatureValidator   *mercado_pago.SignatureValidator
-	CreatePreference     *usecases.CreatePaymentPreference
+	CreatePaymentOrder   *usecases.CreatePaymentPreference
 	HandlePaymentWebhook *usecases.HandlePaymentWebhook
 	GetPaymentStatus     *usecases.GetPaymentStatus
+	RetryPayment         *usecases.RetryPayment
+	CancelPaymentOrder   *usecases.CancelPaymentOrder
+	RefundPaymentOrder   *usecases.RefundPaymentOrder
 }
 
 func NewModule(
@@ -28,7 +32,11 @@ func NewModule(
 ) *Module {
 	if client == nil {
 		if os.Getenv("MP_ACCESS_TOKEN") != "" {
-			client = mercado_pago.NewClientFromEnv()
+			var err error
+			client, err = mercado_pago.NewSDKClientFromEnv()
+			if err != nil {
+				log.Fatalf("mercado pago sdk: %v", err)
+			}
 		} else {
 			client = mercado_pago.NewNoOpClient()
 		}
@@ -36,8 +44,11 @@ func NewModule(
 	return &Module{
 		MercadoPagoClient:    client,
 		SignatureValidator:   mercado_pago.NewSignatureValidator(os.Getenv("MP_WEBHOOK_SECRET")),
-		CreatePreference:     usecases.NewCreatePaymentPreference(client),
+		CreatePaymentOrder:   usecases.NewCreatePaymentPreference(client),
 		HandlePaymentWebhook: usecases.NewHandlePaymentWebhook(client, orderRepo, historyRepo, customerAdapter, emailService),
 		GetPaymentStatus:     usecases.NewGetPaymentStatus(orderRepo),
+		RetryPayment:         usecases.NewRetryPayment(client, orderRepo, historyRepo),
+		CancelPaymentOrder:   usecases.NewCancelPaymentOrder(client),
+		RefundPaymentOrder:   usecases.NewRefundPaymentOrder(client),
 	}
 }

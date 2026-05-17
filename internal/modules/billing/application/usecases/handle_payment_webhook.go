@@ -11,8 +11,8 @@ import (
 )
 
 type HandlePaymentWebhookInput struct {
-	PaymentID         string
-	ExternalReference string
+	MPOrderID         string // data.id do webhook da Orders API (order_id)
+	ExternalReference string // fallback do payload (external_reference)
 }
 
 type HandlePaymentWebhookOutput struct {
@@ -45,13 +45,15 @@ func NewHandlePaymentWebhook(
 	}
 }
 
+// Execute processa um webhook da Orders API do Mercado Pago.
+// O data.id do payload é o MP Order ID; usamos GetOrder para obter o status atual.
 func (uc *HandlePaymentWebhook) Execute(ctx context.Context, input HandlePaymentWebhookInput) (*HandlePaymentWebhookOutput, error) {
-	mpPayment, err := uc.client.GetPayment(ctx, input.PaymentID)
+	mpOrder, err := uc.client.GetOrder(ctx, input.MPOrderID)
 	if err != nil {
 		return nil, err
 	}
 
-	orderID := mpPayment.ExternalReference
+	orderID := mpOrder.ExternalReference
 	if orderID == "" {
 		orderID = input.ExternalReference
 	}
@@ -59,15 +61,15 @@ func (uc *HandlePaymentWebhook) Execute(ctx context.Context, input HandlePayment
 		return nil, payment.ErrMalformedWebhook
 	}
 
-	switch mpPayment.Status {
+	switch mpOrder.PaymentStatus {
 	case "approved":
-		return uc.markApproved(ctx, orderID, mpPayment.ID)
+		return uc.markApproved(ctx, orderID, mpOrder.PaymentID)
 	case "rejected", "cancelled", "canceled":
-		return uc.markRejected(ctx, orderID, mpPayment.ID, mpPayment.Status)
+		return uc.markRejected(ctx, orderID, mpOrder.PaymentID, mpOrder.PaymentStatus, mpOrder.PaymentStatusDetail)
 	case "pending", "in_process":
-		return &HandlePaymentWebhookOutput{Processed: false, Status: mpPayment.Status, OrderID: orderID}, nil
+		return &HandlePaymentWebhookOutput{Processed: false, Status: mpOrder.PaymentStatus, OrderID: orderID}, nil
 	default:
-		return &HandlePaymentWebhookOutput{Processed: false, Status: mpPayment.Status, OrderID: orderID}, nil
+		return &HandlePaymentWebhookOutput{Processed: false, Status: mpOrder.PaymentStatus, OrderID: orderID}, nil
 	}
 }
 
@@ -87,7 +89,7 @@ func (uc *HandlePaymentWebhook) markApproved(ctx context.Context, orderID, payme
 	if err := order.ConfirmPayment(paymentID); err != nil {
 		return nil, err
 	}
-	if err := uc.saveHistory(ctx, order, oldStatus, order.Status(), paymentID, "approved"); err != nil {
+	if err := uc.saveHistory(ctx, order, oldStatus, order.Status(), paymentID, "approved", ""); err != nil {
 		return nil, err
 	}
 	if err := uc.orderRepo.Save(ctx, order); err != nil {
@@ -97,12 +99,12 @@ func (uc *HandlePaymentWebhook) markApproved(ctx context.Context, orderID, payme
 	return &HandlePaymentWebhookOutput{Processed: true, Status: order.Status().String(), OrderID: order.ID()}, nil
 }
 
-func (uc *HandlePaymentWebhook) markRejected(ctx context.Context, orderID, paymentID, paymentStatus string) (*HandlePaymentWebhookOutput, error) {
+func (uc *HandlePaymentWebhook) markRejected(ctx context.Context, orderID, paymentID, paymentStatus, statusDetail string) (*HandlePaymentWebhookOutput, error) {
 	order, err := uc.orderRepo.FindByID(ctx, orderID)
 	if err != nil {
 		return nil, err
 	}
-	if order.Status() == service_order.StatusCompleted {
+	if order.Status() == service_order.StatusPaymentRejected {
 		return &HandlePaymentWebhookOutput{Processed: false, Status: order.Status().String(), OrderID: order.ID()}, nil
 	}
 	if order.Status() != service_order.StatusAwaitingPayment {
@@ -113,7 +115,7 @@ func (uc *HandlePaymentWebhook) markRejected(ctx context.Context, orderID, payme
 	if err := order.RejectPayment(); err != nil {
 		return nil, err
 	}
-	if err := uc.saveHistory(ctx, order, oldStatus, order.Status(), paymentID, paymentStatus); err != nil {
+	if err := uc.saveHistory(ctx, order, oldStatus, order.Status(), paymentID, paymentStatus, statusDetail); err != nil {
 		return nil, err
 	}
 	if err := uc.orderRepo.Save(ctx, order); err != nil {
@@ -123,10 +125,13 @@ func (uc *HandlePaymentWebhook) markRejected(ctx context.Context, orderID, payme
 	return &HandlePaymentWebhookOutput{Processed: true, Status: order.Status().String(), OrderID: order.ID()}, nil
 }
 
-func (uc *HandlePaymentWebhook) saveHistory(ctx context.Context, order *service_order.ServiceOrder, oldStatus, newStatus service_order.OrderStatus, paymentID, paymentStatus string) error {
+func (uc *HandlePaymentWebhook) saveHistory(ctx context.Context, order *service_order.ServiceOrder, oldStatus, newStatus service_order.OrderStatus, paymentID, paymentStatus, statusDetail string) error {
 	metadata := service_order.BuildStatusOnlyMetadata(oldStatus, newStatus)
 	metadata["mp_payment_id"] = paymentID
 	metadata["mp_payment_status"] = paymentStatus
+	if statusDetail != "" {
+		metadata["mp_payment_status_detail"] = statusDetail
+	}
 	history, err := service_order.NewHistory(order.ID(), metadata, newStatus)
 	if err != nil {
 		return err

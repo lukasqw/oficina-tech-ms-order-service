@@ -12,7 +12,7 @@ import (
 )
 
 func TestPaymentHandlerReturnsPaymentURL(t *testing.T) {
-	handler := NewPaymentHandler(billingUsecases.NewGetPaymentStatus(newHandlerOrderRepo(handlerAwaitingPaymentOrder(t))))
+	handler := NewPaymentHandler(billingUsecases.NewGetPaymentStatus(newHandlerOrderRepo(handlerAwaitingPaymentOrder(t))), nil)
 	req := httptest.NewRequest(http.MethodGet, "/service-orders/"+handlerOrderID+"/payment", nil)
 	req.SetPathValue("id", handlerOrderID)
 	rr := httptest.NewRecorder()
@@ -28,7 +28,7 @@ func TestPaymentHandlerReturnsPaymentURL(t *testing.T) {
 }
 
 func TestPaymentHandlerReturns404WhenNotAwaitingPayment(t *testing.T) {
-	handler := NewPaymentHandler(billingUsecases.NewGetPaymentStatus(newHandlerOrderRepo(handlerCompletedOrder(t))))
+	handler := NewPaymentHandler(billingUsecases.NewGetPaymentStatus(newHandlerOrderRepo(handlerCompletedOrder(t))), nil)
 	req := httptest.NewRequest(http.MethodGet, "/service-orders/"+handlerOrderID+"/payment", nil)
 	req.SetPathValue("id", handlerOrderID)
 	rr := httptest.NewRecorder()
@@ -41,7 +41,7 @@ func TestPaymentHandlerReturns404WhenNotAwaitingPayment(t *testing.T) {
 }
 
 func TestPaymentHandlerRejectsInvalidUUID(t *testing.T) {
-	handler := NewPaymentHandler(billingUsecases.NewGetPaymentStatus(newHandlerOrderRepo(handlerAwaitingPaymentOrder(t))))
+	handler := NewPaymentHandler(billingUsecases.NewGetPaymentStatus(newHandlerOrderRepo(handlerAwaitingPaymentOrder(t))), nil)
 	req := httptest.NewRequest(http.MethodGet, "/service-orders/bad/payment", nil)
 	req.SetPathValue("id", "bad")
 	rr := httptest.NewRecorder()

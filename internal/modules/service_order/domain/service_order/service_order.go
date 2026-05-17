@@ -17,6 +17,8 @@ type ServiceOrder struct {
 	mpPreferenceID   *string
 	mpPaymentID      *string
 	paymentURL       *string
+	customerEmail    string
+	customerName     string
 	items            []*ServiceOrderItem
 	closedAt         *time.Time
 	createdAt        time.Time
@@ -241,7 +243,7 @@ func (s *ServiceOrder) ConfirmPayment(paymentID string) error {
 }
 
 func (s *ServiceOrder) RejectPayment() error {
-	if err := s.UpdateStatus(StatusCompleted); err != nil {
+	if err := s.UpdateStatus(StatusPaymentRejected); err != nil {
 		return err
 	}
 	s.sagaStatus = SagaStatusIdle
@@ -442,6 +444,22 @@ func (s *ServiceOrder) SagaNotes() *string {
 
 func (s *ServiceOrder) MPPreferenceID() *string {
 	return s.mpPreferenceID
+}
+
+// SetCustomerSnapshot persiste email e nome do cliente na OS para uso no pagamento MP.
+// Chamado uma vez na criação da OS — evita chamada extra ao MS1 no momento do pagamento.
+func (s *ServiceOrder) SetCustomerSnapshot(email, name string) {
+	s.customerEmail = email
+	s.customerName = name
+	s.updatedAt = time.Now()
+}
+
+func (s *ServiceOrder) CustomerEmail() string {
+	return s.customerEmail
+}
+
+func (s *ServiceOrder) CustomerName() string {
+	return s.customerName
 }
 
 func (s *ServiceOrder) MPPaymentID() *string {
