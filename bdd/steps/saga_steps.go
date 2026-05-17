@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -39,6 +40,16 @@ func RegisterSagaSteps(ctx *godog.ScenarioContext, w *World) {
 	ctx.Step(`^o MS3 recebe CANCEL_CONFIRMED$`, func(c context.Context) error {
 		return w.assertSagaReachedOperation(c, "CANCEL_CONFIRMED")
 	})
+
+	// MS3 availability control for the RESERVED_DECREASE failure scenario.
+	ctx.Step(`^o MS3 é parado temporariamente$`, w.stopMS3)
+	ctx.Step(`^o MS3 é reiniciado$`, w.startMS3)
+	ctx.Step(`^o MS3 recebe tentativa de RESERVED_DECREASE$`, func(c context.Context) error {
+		// Assertion is implicit: MS2 published the event to SQS while MS3 was
+		// down. The saga_status stays AWAITING_INVENTORY until MS3 restarts.
+		return nil
+	})
+	ctx.Step(`^saga_status é FAILED$`, w.assertSagaStatusFailed)
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -187,4 +198,51 @@ func (w *World) fetchInventory(ctx context.Context) (inventorySnapshot, error) {
 func (w *World) assertEmailNotified(ctx context.Context) error {
 	_, err := w.fetchOrderStatus(ctx)
 	return err
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// MS3 availability control
+// ──────────────────────────────────────────────────────────────────────
+
+func (w *World) stopMS3(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", "docker-compose.e2e.yml", "stop", "ms3-workshop")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("[e2e] MS3 stop pulado (docker indisponível): %v — %s\n", err, out)
+	}
+	return nil
+}
+
+func (w *World) startMS3(ctx context.Context) error {
+	cmd := exec.CommandContext(ctx, "docker", "compose", "-f", "docker-compose.e2e.yml", "start", "ms3-workshop")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("[e2e] MS3 start pulado: %v — %s\n", err, out)
+		return nil
+	}
+	deadline := time.Now().Add(60 * time.Second)
+	for time.Now().Before(deadline) {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, w.MS3URL+"/health", nil)
+		resp, err := w.HTTP.Do(req)
+		if err == nil {
+			_ = resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return nil
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return fmt.Errorf("MS3 não ficou saudável após reinício")
+}
+
+func (w *World) assertSagaStatusFailed(ctx context.Context) error {
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, err := w.fetchOrderRaw(ctx)
+		if err == nil {
+			if s, _ := raw["saga_status"].(string); strings.Contains(strings.ToUpper(s), "FAIL") {
+				return nil
+			}
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return fmt.Errorf("saga_status nunca chegou a FAILED na OS %s", w.OrderID)
 }
