@@ -27,3 +27,41 @@ Funcionalidade: Compensações da saga de estoque
     Então o MS3 recebe comando de CANCEL_RESERVED
     E o MS3 libera a reserva de estoque
     E a OS avança para CANCELED
+
+  Cenário: OS cancelada em RECEIVED sem saga disparada
+    Dado um cliente cadastrado com veículo registrado
+    E o MS3 possui estoque suficiente para todos os produtos
+    Quando o cliente abre uma OS com troca de óleo e filtro de ar
+    Então a OS é criada com status RECEIVED
+    Quando o cliente cancela a OS
+    Então a OS está em CANCELED
+    E nenhuma operação de saga é disparada ao cancelar
+
+  Cenário: OS cancelada em DIAGNOSING sem saga disparada
+    Dado uma OS em DIAGNOSING com estoque reservado
+    Quando o cliente cancela a OS
+    Então a OS está em CANCELED
+    E nenhuma operação de saga é disparada ao cancelar
+
+  Cenário: OS cancelada em AUTHORIZED dispara CANCEL_RESERVED
+    Dado uma OS em AUTHORIZED com estoque reservado
+    Quando o cliente cancela a OS
+    Então o MS3 recebe comando de CANCEL_RESERVED
+    E o MS3 libera a reserva de estoque
+    E a OS avança para CANCELED
+
+  Cenário: OS cancelada em AWAITING_PAYMENT dispara CANCEL_CONFIRMED
+    Dado uma OS em COMPLETED com estoque reservado
+    Quando advance dispara criação de preferência MP (MP mock retorna preference_id)
+    Então a OS está em AWAITING_PAYMENT
+    Quando o cliente cancela a OS
+    Então o MS3 recebe CANCEL_CONFIRMED
+    E a OS avança para CANCELED
+
+  Cenário: MS3 indisponível durante RESERVED_DECREASE — saga recupera ao reiniciar MS3
+    Dado uma OS em IN_PROGRESS com estoque reservado
+    E o MS3 é parado temporariamente
+    Quando o mecânico avança a OS para COMPLETED
+    Então a OS permanece em IN_PROGRESS
+    Quando o MS3 é reiniciado
+    Então a OS avança para COMPLETED

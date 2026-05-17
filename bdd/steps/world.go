@@ -37,8 +37,15 @@ type World struct {
 	OrderID    string
 
 	// Default item used by most scenarios — a product reference + quantity.
-	OrderItem orderItem
+	OrderItem  orderItem
 	OrderItem2 orderItem
+
+	// Captured during multi-order scenarios.
+	SecondOrderID string
+
+	// HTTP status from the last webhook or item-update call.
+	LastResponseStatus      int
+	LastWebhookResponseStatus int
 }
 
 type orderItem struct {

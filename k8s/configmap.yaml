@@ -12,3 +12,5 @@ data:
   MS3_BASE_URL: "http://ms3-service:8083"
   MP_NOTIFICATION_URL: "https://api.oficina-tech.com/payments/mp-webhook"
   AWS_DEFAULT_REGION: "us-east-1"
+  APP_ENV: "production"
+  APP_VERSION: "1.0.0"

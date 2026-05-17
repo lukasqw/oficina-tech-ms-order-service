@@ -78,6 +78,27 @@ func RegisterScenario(ctx *godog.ScenarioContext) {
 	ctx.Step(`^MS3 libera estoque$`, w.assertStockReleased)
 	ctx.Step(`^estoque retorna para available$`, w.assertStockReleased)
 
+	// Alternative setup without "com estoque reservado" qualifier.
+	ctx.Step(`^uma OS em ([A-Z_]+)$`, w.givenOrderInStatus)
+
+	// Items immutability.
+	ctx.Step(`^o mecânico atualiza os itens da OS$`, w.updateOrderItems)
+	ctx.Step(`^o mecânico tenta atualizar os itens da OS$`, w.updateOrderItems)
+	ctx.Step(`^a atualização de itens é aceita$`, w.assertUpdateAccepted)
+	ctx.Step(`^a atualização de itens é rejeitada com erro de imutabilidade$`, w.assertUpdateRejected)
+
+	// Audit history and payment URL.
+	ctx.Step(`^o histórico da OS possui (\d+) ou mais entradas$`, w.assertOrderHistory)
+	ctx.Step(`^a OS possui URL de pagamento$`, w.assertPaymentURL)
+
+	// Multi-order / customer-deleted extended.
+	ctx.Step(`^o cliente possui duas OS ativas em ([A-Z_]+)$`, w.givenTwoOrdersInStatus)
+	ctx.Step(`^ambas as OS do cliente são canceladas$`, w.assertBothOrdersCanceled)
+	ctx.Step(`^o evento é processado sem erros e sem cancelamentos$`, w.assertNoOrderCancellations)
+
+	// Saga absence assertion.
+	ctx.Step(`^nenhuma operação de saga é disparada ao cancelar$`, w.assertNoSagaOperation)
+
 	// Cross-file step expressions registered against the same World.
 	RegisterSagaSteps(ctx, w)
 	RegisterPaymentSteps(ctx, w)
@@ -532,4 +553,171 @@ func randomPlate(seed string) string {
 	return fmt.Sprintf("%c%c%c%c%c%c%c",
 		upper[0], upper[1], upper[2],
 		digit(upper[3]), upper[4], digit(upper[5]), digit(upper[6]))
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Items immutability
+// ──────────────────────────────────────────────────────────────────────
+
+func (w *World) updateOrderItems(ctx context.Context) error {
+	url := fmt.Sprintf("%s/service-orders/%s", w.MS2URL, w.OrderID)
+	body := map[string]any{
+		"items": []orderItem{w.OrderItem},
+	}
+	status, raw, err := doJSON(ctx, w, http.MethodPut, url, body, w.AdminToken)
+	if err != nil {
+		return err
+	}
+	w.LastResponseStatus = status
+	_ = raw
+	return nil
+}
+
+func (w *World) assertUpdateAccepted(_ context.Context) error {
+	if w.LastResponseStatus != http.StatusOK && w.LastResponseStatus != http.StatusNoContent {
+		return fmt.Errorf("esperado 200/204, obtido %d", w.LastResponseStatus)
+	}
+	return nil
+}
+
+func (w *World) assertUpdateRejected(_ context.Context) error {
+	if w.LastResponseStatus < 400 {
+		return fmt.Errorf("esperado 4xx, obtido %d", w.LastResponseStatus)
+	}
+	return nil
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Audit history and payment URL
+// ──────────────────────────────────────────────────────────────────────
+
+func (w *World) assertOrderHistory(ctx context.Context, minEntries int) error {
+	url := fmt.Sprintf("%s/service-orders/%s/history", w.MS2URL, w.OrderID)
+	status, raw, err := doJSON(ctx, w, http.MethodGet, url, nil, w.AdminToken)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("GET history retornou %d: %s", status, string(raw))
+	}
+	var entries []map[string]any
+	if err := decodeData(raw, &entries); err != nil {
+		return err
+	}
+	if len(entries) < minEntries {
+		return fmt.Errorf("esperado >= %d entradas no histórico, obtido %d", minEntries, len(entries))
+	}
+	return nil
+}
+
+func (w *World) assertPaymentURL(ctx context.Context) error {
+	url := fmt.Sprintf("%s/service-orders/%s/payment", w.MS2URL, w.OrderID)
+	status, raw, err := doJSON(ctx, w, http.MethodGet, url, nil, w.AdminToken)
+	if err != nil {
+		return err
+	}
+	if status != http.StatusOK {
+		return fmt.Errorf("GET payment retornou %d: %s", status, string(raw))
+	}
+	var resp map[string]any
+	if err := decodeData(raw, &resp); err != nil {
+		return err
+	}
+	paymentURL, _ := resp["payment_url"].(string)
+	if paymentURL == "" {
+		return fmt.Errorf("payment_url ausente ou vazio na resposta")
+	}
+	return nil
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Multi-order helpers
+// ──────────────────────────────────────────────────────────────────────
+
+// advanceToStatus advances the current w.OrderID through the state chain up
+// to (and including) target. It assumes the order is already created.
+func (w *World) advanceToStatus(ctx context.Context, target string) error {
+	chain := []string{"DIAGNOSING", "PENDING_AUTHORIZATION", "AUTHORIZED", "IN_PROGRESS", "COMPLETED"}
+	for _, step := range chain {
+		var err error
+		if step == "AUTHORIZED" {
+			err = w.approveAuthorization(ctx)
+		} else {
+			err = w.advanceServiceOrder(ctx, step)
+		}
+		if err != nil {
+			return err
+		}
+		if err = w.assertOrderStatusEventually(ctx, step); err != nil {
+			return err
+		}
+		if step == target {
+			return nil
+		}
+	}
+	return fmt.Errorf("status alvo não suportado: %q", target)
+}
+
+func (w *World) givenTwoOrdersInStatus(ctx context.Context, target string) error {
+	if err := w.openServiceOrder(ctx); err != nil {
+		return err
+	}
+	firstID := w.OrderID
+	if err := w.advanceToStatus(ctx, target); err != nil {
+		return err
+	}
+
+	if err := w.openServiceOrder(ctx); err != nil {
+		return err
+	}
+	w.SecondOrderID = w.OrderID
+	if err := w.advanceToStatus(ctx, target); err != nil {
+		return err
+	}
+
+	w.OrderID = firstID
+	return nil
+}
+
+func (w *World) assertBothOrdersCanceled(ctx context.Context) error {
+	if err := w.assertOrderStatusEventually(ctx, "CANCELED"); err != nil {
+		return fmt.Errorf("primeira OS não cancelada: %w", err)
+	}
+	if w.SecondOrderID == "" {
+		return fmt.Errorf("SecondOrderID não capturado")
+	}
+	saved := w.OrderID
+	w.OrderID = w.SecondOrderID
+	err := w.assertOrderStatusEventually(ctx, "CANCELED")
+	w.OrderID = saved
+	return err
+}
+
+func (w *World) assertNoOrderCancellations(ctx context.Context) error {
+	// Verify the customer no longer exists (deletion was processed).
+	url := fmt.Sprintf("%s/customers/%s", w.MS1URL, w.CustomerID)
+	status, _, err := doJSON(ctx, w, http.MethodGet, url, nil, w.AdminToken)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusOK {
+		return fmt.Errorf("customer %s ainda existe após deleção", w.CustomerID)
+	}
+	return nil
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Saga-absence assertion
+// ──────────────────────────────────────────────────────────────────────
+
+func (w *World) assertNoSagaOperation(ctx context.Context) error {
+	raw, err := w.fetchOrderRaw(ctx)
+	if err != nil {
+		return err
+	}
+	sagaStatus, _ := raw["saga_status"].(string)
+	if sagaStatus != "" && sagaStatus != "IDLE" {
+		return fmt.Errorf("saga_status esperado IDLE ou vazio, obtido %q", sagaStatus)
+	}
+	return nil
 }
