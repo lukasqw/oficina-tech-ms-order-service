@@ -23,14 +23,14 @@ func TestHandlePaymentWebhookApprovedTransitionsToPaid(t *testing.T) {
 	historyRepo := &memoryHistoryRepo{}
 	emailService := email.NewMockEmailService()
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-1", Status: "approved", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-1", PaymentID: "pay-1", PaymentStatus: "approved", ExternalReference: testOrderID}},
 		repo,
 		historyRepo,
 		&fakeCustomerAdapter{},
 		emailService,
 	)
 
-	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-1"})
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-1"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -55,14 +55,14 @@ func TestHandlePaymentWebhookApprovedTransitionsToPaid(t *testing.T) {
 func TestHandlePaymentWebhookRejectedTransitionsToPaymentRejected(t *testing.T) {
 	repo := newMemoryOrderRepo(awaitingPaymentOrder(t))
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-2", Status: "rejected", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-2", PaymentID: "pay-2", PaymentStatus: "rejected", ExternalReference: testOrderID}},
 		repo,
 		&memoryHistoryRepo{},
 		&fakeCustomerAdapter{},
 		email.NewMockEmailService(),
 	)
 
-	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-2"})
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-2"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -78,14 +78,14 @@ func TestHandlePaymentWebhookRejectedTransitionsToPaymentRejected(t *testing.T) 
 func TestHandlePaymentWebhookRejectedIsIdempotentWhenAlreadyCompleted(t *testing.T) {
 	historyRepo := &memoryHistoryRepo{}
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-2", Status: "cancelled", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-2", PaymentID: "pay-2", PaymentStatus: "cancelled", ExternalReference: testOrderID}},
 		newMemoryOrderRepo(completedOrder(t)),
 		historyRepo,
 		&fakeCustomerAdapter{},
 		email.NewMockEmailService(),
 	)
 
-	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-2"})
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-2"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -98,14 +98,14 @@ func TestHandlePaymentWebhookPendingIsIgnored(t *testing.T) {
 	order := awaitingPaymentOrder(t)
 	repo := newMemoryOrderRepo(order)
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-3", Status: "pending", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-3", PaymentID: "pay-3", PaymentStatus: "pending", ExternalReference: testOrderID}},
 		repo,
 		&memoryHistoryRepo{},
 		&fakeCustomerAdapter{},
 		email.NewMockEmailService(),
 	)
 
-	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-3"})
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-3"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -125,14 +125,14 @@ func TestHandlePaymentWebhookApprovedIsIdempotentWhenAlreadyPaid(t *testing.T) {
 	repo := newMemoryOrderRepo(order)
 	historyRepo := &memoryHistoryRepo{}
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-1", Status: "approved", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-1", PaymentID: "pay-1", PaymentStatus: "approved", ExternalReference: testOrderID}},
 		repo,
 		historyRepo,
 		&fakeCustomerAdapter{},
 		email.NewMockEmailService(),
 	)
 
-	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-1"})
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-1"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -144,14 +144,14 @@ func TestHandlePaymentWebhookApprovedIsIdempotentWhenAlreadyPaid(t *testing.T) {
 func TestHandlePaymentWebhookApprovedIgnoredWhenOrderIsNotAwaiting(t *testing.T) {
 	historyRepo := &memoryHistoryRepo{}
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-1", Status: "approved", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-1", PaymentID: "pay-1", PaymentStatus: "approved", ExternalReference: testOrderID}},
 		newMemoryOrderRepo(completedOrder(t)),
 		historyRepo,
 		&fakeCustomerAdapter{},
 		email.NewMockEmailService(),
 	)
 
-	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-1"})
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-1"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -162,28 +162,28 @@ func TestHandlePaymentWebhookApprovedIgnoredWhenOrderIsNotAwaiting(t *testing.T)
 
 func TestHandlePaymentWebhookApprovedPropagatesHistoryError(t *testing.T) {
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-1", Status: "approved", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-1", PaymentID: "pay-1", PaymentStatus: "approved", ExternalReference: testOrderID}},
 		newMemoryOrderRepo(awaitingPaymentOrder(t)),
 		&memoryHistoryRepo{err: errors.New("history failed")},
 		&fakeCustomerAdapter{},
 		email.NewMockEmailService(),
 	)
 
-	if _, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-1"}); err == nil {
+	if _, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-1"}); err == nil {
 		t.Fatalf("expected history error")
 	}
 }
 
 func TestHandlePaymentWebhookApprovedSkipsEmailWhenCustomerLookupFails(t *testing.T) {
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-1", Status: "approved", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-1", PaymentID: "pay-1", PaymentStatus: "approved", ExternalReference: testOrderID}},
 		newMemoryOrderRepo(awaitingPaymentOrder(t)),
 		&memoryHistoryRepo{},
 		&fakeCustomerAdapter{err: errors.New("customer failed")},
 		email.NewMockEmailService(),
 	)
 
-	if _, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-1"}); err != nil {
+	if _, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-1"}); err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
 }
@@ -191,14 +191,14 @@ func TestHandlePaymentWebhookApprovedSkipsEmailWhenCustomerLookupFails(t *testin
 func TestHandlePaymentWebhookUsesPayloadExternalReferenceFallback(t *testing.T) {
 	repo := newMemoryOrderRepo(awaitingPaymentOrder(t))
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-4", Status: "approved"}},
+		&fakeMPClient{order: &payment.Order{ID: "order-4", PaymentID: "pay-4", PaymentStatus: "approved"}},
 		repo,
 		&memoryHistoryRepo{},
 		&fakeCustomerAdapter{},
 		email.NewMockEmailService(),
 	)
 
-	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-4", ExternalReference: testOrderID})
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-4", ExternalReference: testOrderID})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -209,28 +209,28 @@ func TestHandlePaymentWebhookUsesPayloadExternalReferenceFallback(t *testing.T) 
 
 func TestHandlePaymentWebhookErrorsWithoutExternalReference(t *testing.T) {
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-5", Status: "approved"}},
+		&fakeMPClient{order: &payment.Order{ID: "order-5", PaymentID: "pay-5", PaymentStatus: "approved"}},
 		newMemoryOrderRepo(awaitingPaymentOrder(t)),
 		&memoryHistoryRepo{},
 		&fakeCustomerAdapter{},
 		email.NewMockEmailService(),
 	)
 
-	if _, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-5"}); err != payment.ErrMalformedWebhook {
+	if _, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-5"}); err != payment.ErrMalformedWebhook {
 		t.Fatalf("expected ErrMalformedWebhook, got %v", err)
 	}
 }
 
 func TestHandlePaymentWebhookUnknownStatusIsIgnored(t *testing.T) {
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{payment: &payment.Payment{ID: "pay-6", Status: "refunded", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-6", PaymentID: "pay-6", PaymentStatus: "refunded", ExternalReference: testOrderID}},
 		newMemoryOrderRepo(awaitingPaymentOrder(t)),
 		&memoryHistoryRepo{},
 		&fakeCustomerAdapter{},
 		email.NewMockEmailService(),
 	)
 
-	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{PaymentID: "pay-6"})
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-6"})
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -311,7 +311,9 @@ func (c *fakeMPClient) CreateOrder(_ context.Context, items []payment.OrderItem,
 	c.externalRef = externalRef
 	return c.order, nil
 }
-func (c *fakeMPClient) GetOrder(context.Context, string) (*payment.Order, error)         { return nil, nil }
+func (c *fakeMPClient) GetOrder(context.Context, string) (*payment.Order, error) {
+	return c.order, nil
+}
 func (c *fakeMPClient) CancelOrder(context.Context, string) (*payment.Order, error)      { return nil, nil }
 func (c *fakeMPClient) RefundOrder(context.Context, string, *string) (*payment.Order, error) {
 	return nil, nil

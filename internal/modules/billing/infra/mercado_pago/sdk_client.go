@@ -153,13 +153,16 @@ func (c *SDKClient) GetPayment(ctx context.Context, paymentID string) (*payment.
 
 func mapOrderResponse(resp *sdkorder.Response) *payment.Order {
 	o := &payment.Order{
-		ID:     resp.ID,
-		Status: resp.Status,
+		ID:                resp.ID,
+		Status:            resp.Status,
+		ExternalReference: resp.ExternalReference,
 	}
 	if len(resp.Transactions.Payments) > 0 {
 		pay := resp.Transactions.Payments[0]
-		o.RedirectURL = pay.PaymentMethod.RedirectURL
-		o.PaymentID = pay.ID
+		o.RedirectURL         = pay.PaymentMethod.RedirectURL
+		o.PaymentID           = pay.ID
+		o.PaymentStatus       = pay.Status
+		o.PaymentStatusDetail = pay.StatusDetail
 	}
 	return o
 }

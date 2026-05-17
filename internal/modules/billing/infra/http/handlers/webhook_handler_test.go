@@ -35,7 +35,7 @@ func TestWebhookHandlerPaymentStatuses(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			repo := newHandlerOrderRepo(handlerAwaitingPaymentOrder(t))
 			handler := newTestWebhookHandler(repo, &handlerMPClient{
-				payment: &payment.Payment{ID: "pay-1", Status: tt.mpStatus, ExternalReference: handlerOrderID},
+				order: &payment.Order{ID: "order-1", PaymentID: "pay-1", PaymentStatus: tt.mpStatus, ExternalReference: handlerOrderID},
 			})
 
 			req := httptest.NewRequest(http.MethodPost, "/payments/mp-webhook", bytes.NewBufferString(`{"data":{"id":"pay-1"}}`))
@@ -56,7 +56,7 @@ func TestWebhookHandlerPaymentStatuses(t *testing.T) {
 
 func TestWebhookHandlerRejectsInvalidSignature(t *testing.T) {
 	handler := newTestWebhookHandler(newHandlerOrderRepo(handlerAwaitingPaymentOrder(t)), &handlerMPClient{
-		payment: &payment.Payment{ID: "pay-1", Status: "approved", ExternalReference: handlerOrderID},
+		order: &payment.Order{ID: "order-1", PaymentID: "pay-1", PaymentStatus: "approved", ExternalReference: handlerOrderID},
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/payments/mp-webhook", bytes.NewBufferString(`{"data":{"id":"pay-1"}}`))
@@ -86,7 +86,7 @@ func TestWebhookHandlerRejectsMalformedPayload(t *testing.T) {
 func TestWebhookHandlerUsesQueryPaymentIDForSignature(t *testing.T) {
 	repo := newHandlerOrderRepo(handlerAwaitingPaymentOrder(t))
 	handler := newTestWebhookHandler(repo, &handlerMPClient{
-		payment: &payment.Payment{ID: "pay-query", Status: "approved", ExternalReference: handlerOrderID},
+		order: &payment.Order{ID: "pay-query", PaymentID: "pay-query", PaymentStatus: "approved", ExternalReference: handlerOrderID},
 	})
 	req := httptest.NewRequest(http.MethodPost, "/payments/mp-webhook?data.id=pay-query", bytes.NewBufferString(`{"data":{"id":"ignored"}}`))
 	signRequest(req, "pay-query")
@@ -169,15 +169,18 @@ func signRequest(req *http.Request, paymentID string) {
 }
 
 type handlerMPClient struct {
-	payment *payment.Payment
-	err     error
+	order *payment.Order
+	err   error
 }
 
 func (c *handlerMPClient) CreateOrder(context.Context, []payment.OrderItem, payment.PayerInfo, string) (*payment.Order, error) {
 	return nil, nil
 }
-func (c *handlerMPClient) GetOrder(context.Context, string) (*payment.Order, error) {
-	return nil, nil
+func (c *handlerMPClient) GetOrder(_ context.Context, _ string) (*payment.Order, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	return c.order, nil
 }
 func (c *handlerMPClient) CancelOrder(context.Context, string) (*payment.Order, error) {
 	return nil, nil
@@ -186,10 +189,7 @@ func (c *handlerMPClient) RefundOrder(context.Context, string, *string) (*paymen
 	return nil, nil
 }
 func (c *handlerMPClient) GetPayment(context.Context, string) (*payment.Payment, error) {
-	if c.err != nil {
-		return nil, c.err
-	}
-	return c.payment, nil
+	return nil, nil
 }
 
 type handlerCustomerAdapter struct{}

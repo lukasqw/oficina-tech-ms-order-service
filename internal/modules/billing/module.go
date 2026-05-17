@@ -18,6 +18,9 @@ type Module struct {
 	CreatePaymentOrder   *usecases.CreatePaymentPreference
 	HandlePaymentWebhook *usecases.HandlePaymentWebhook
 	GetPaymentStatus     *usecases.GetPaymentStatus
+	RetryPayment         *usecases.RetryPayment
+	CancelPaymentOrder   *usecases.CancelPaymentOrder
+	RefundPaymentOrder   *usecases.RefundPaymentOrder
 }
 
 func NewModule(
@@ -44,5 +47,8 @@ func NewModule(
 		CreatePaymentOrder:   usecases.NewCreatePaymentPreference(client),
 		HandlePaymentWebhook: usecases.NewHandlePaymentWebhook(client, orderRepo, historyRepo, customerAdapter, emailService),
 		GetPaymentStatus:     usecases.NewGetPaymentStatus(orderRepo),
+		RetryPayment:         usecases.NewRetryPayment(client, orderRepo, historyRepo),
+		CancelPaymentOrder:   usecases.NewCancelPaymentOrder(client),
+		RefundPaymentOrder:   usecases.NewRefundPaymentOrder(client),
 	}
 }

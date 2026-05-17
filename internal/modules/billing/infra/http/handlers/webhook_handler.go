@@ -54,7 +54,7 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	output, err := h.useCase.Execute(ctx, usecases.HandlePaymentWebhookInput{
-		PaymentID:         paymentID,
+		MPOrderID:         paymentID, // data.id no payload da Orders API = order_id
 		ExternalReference: payload.ExternalReference,
 	})
 	if err != nil {

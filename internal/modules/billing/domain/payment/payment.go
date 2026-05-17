@@ -20,10 +20,13 @@ type PayerInfo struct {
 
 // Order representa um Order criado na Orders API do Mercado Pago.
 type Order struct {
-	ID          string // mp_order_id (ex: "order-abc123")
-	Status      string // created, processed, action_required, in_process, completed, cancelled
-	RedirectURL string // URL de checkout para o cliente pagar (equivalente ao init_point)
-	PaymentID   string // ID do primeiro payment interno ao order (se disponível)
+	ID                  string // mp_order_id (ex: "order-abc123")
+	Status              string // created, processed, action_required, in_process, completed, cancelled
+	RedirectURL         string // URL de checkout para o cliente pagar (equivalente ao init_point)
+	ExternalReference   string // external_reference do order = ID da OS
+	PaymentID           string // ID do primeiro payment interno ao order
+	PaymentStatus       string // status do payment: approved, rejected, pending, cancelled...
+	PaymentStatusDetail string // status_detail do payment (motivo de rejeição)
 }
 
 // Payment representa o pagamento interno a um Order (transactions.payments[0]).
