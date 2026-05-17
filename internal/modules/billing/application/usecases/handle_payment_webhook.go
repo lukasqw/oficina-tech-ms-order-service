@@ -11,7 +11,7 @@ import (
 )
 
 type HandlePaymentWebhookInput struct {
-	MPOrderID         string // data.id do webhook da Orders API (order_id)
+	MPOrderID         string // data.id do webhook da Preferences API (payment_id)
 	ExternalReference string // fallback do payload (external_reference)
 }
 
@@ -45,15 +45,15 @@ func NewHandlePaymentWebhook(
 	}
 }
 
-// Execute processa um webhook da Orders API do Mercado Pago.
-// O data.id do payload é o MP Order ID; usamos GetOrder para obter o status atual.
+// Execute processa um webhook da Preferences API do Mercado Pago.
+// O data.id do payload é o payment ID; usamos GetPayment para obter o status atual.
 func (uc *HandlePaymentWebhook) Execute(ctx context.Context, input HandlePaymentWebhookInput) (*HandlePaymentWebhookOutput, error) {
-	mpOrder, err := uc.client.GetOrder(ctx, input.MPOrderID)
+	mpPayment, err := uc.client.GetPayment(ctx, input.MPOrderID)
 	if err != nil {
 		return nil, err
 	}
 
-	orderID := mpOrder.ExternalReference
+	orderID := mpPayment.ExternalReference
 	if orderID == "" {
 		orderID = input.ExternalReference
 	}
@@ -61,15 +61,15 @@ func (uc *HandlePaymentWebhook) Execute(ctx context.Context, input HandlePayment
 		return nil, payment.ErrMalformedWebhook
 	}
 
-	switch mpOrder.PaymentStatus {
+	switch mpPayment.Status {
 	case "approved":
-		return uc.markApproved(ctx, orderID, mpOrder.PaymentID)
+		return uc.markApproved(ctx, orderID, mpPayment.ID)
 	case "rejected", "cancelled", "canceled":
-		return uc.markRejected(ctx, orderID, mpOrder.PaymentID, mpOrder.PaymentStatus, mpOrder.PaymentStatusDetail)
+		return uc.markRejected(ctx, orderID, mpPayment.ID, mpPayment.Status, mpPayment.StatusDetail)
 	case "pending", "in_process":
-		return &HandlePaymentWebhookOutput{Processed: false, Status: mpOrder.PaymentStatus, OrderID: orderID}, nil
+		return &HandlePaymentWebhookOutput{Processed: false, Status: mpPayment.Status, OrderID: orderID}, nil
 	default:
-		return &HandlePaymentWebhookOutput{Processed: false, Status: mpOrder.PaymentStatus, OrderID: orderID}, nil
+		return &HandlePaymentWebhookOutput{Processed: false, Status: mpPayment.Status, OrderID: orderID}, nil
 	}
 }
 
