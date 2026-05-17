@@ -1,6 +1,7 @@
 # language: pt
 Funcionalidade: Compensações da saga de estoque
 
+  @integration
   Cenário: OS cancelada por estoque insuficiente ao tentar reservar
     Dado um cliente cadastrado com veículo registrado
     E o MS3 NÃO possui estoque suficiente para os produtos solicitados
@@ -13,6 +14,7 @@ Funcionalidade: Compensações da saga de estoque
     E a OS permanece em DIAGNOSING
     E nenhuma reserva de estoque é mantida
 
+  @integration
   Cenário: OS com autorização negada pelo cliente
     Dado uma OS em PENDING_AUTHORIZATION com estoque reservado
     Quando o cliente nega a autorização
@@ -21,6 +23,7 @@ Funcionalidade: Compensações da saga de estoque
     E a OS avança para AUTHORIZATION_DENIED
     E o cliente recebe notificação por email
 
+  @integration
   Cenário: OS cancelada pelo cliente durante execução
     Dado uma OS em IN_PROGRESS com estoque reservado
     Quando o cliente cancela a OS
@@ -28,6 +31,7 @@ Funcionalidade: Compensações da saga de estoque
     E o MS3 libera a reserva de estoque
     E a OS avança para CANCELED
 
+  @integration
   Cenário: OS cancelada em RECEIVED sem saga disparada
     Dado um cliente cadastrado com veículo registrado
     E o MS3 possui estoque suficiente para todos os produtos
@@ -37,12 +41,14 @@ Funcionalidade: Compensações da saga de estoque
     Então a OS está em CANCELED
     E nenhuma operação de saga é disparada ao cancelar
 
+  @integration
   Cenário: OS cancelada em DIAGNOSING sem saga disparada
     Dado uma OS em DIAGNOSING com estoque reservado
     Quando o cliente cancela a OS
     Então a OS está em CANCELED
     E nenhuma operação de saga é disparada ao cancelar
 
+  @integration
   Cenário: OS cancelada em AUTHORIZED dispara CANCEL_RESERVED
     Dado uma OS em AUTHORIZED com estoque reservado
     Quando o cliente cancela a OS
@@ -50,6 +56,7 @@ Funcionalidade: Compensações da saga de estoque
     E o MS3 libera a reserva de estoque
     E a OS avança para CANCELED
 
+  @integration
   Cenário: OS cancelada em AWAITING_PAYMENT dispara CANCEL_CONFIRMED
     Dado uma OS em COMPLETED com estoque reservado
     Quando advance dispara criação de preferência MP (MP mock retorna preference_id)
@@ -58,6 +65,7 @@ Funcionalidade: Compensações da saga de estoque
     Então o MS3 recebe CANCEL_CONFIRMED
     E a OS avança para CANCELED
 
+  @integration
   Cenário: MS3 indisponível durante RESERVED_DECREASE — saga recupera ao reiniciar MS3
     Dado uma OS em IN_PROGRESS com estoque reservado
     E o MS3 é parado temporariamente

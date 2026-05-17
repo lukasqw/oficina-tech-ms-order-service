@@ -27,6 +27,10 @@ import (
 	"oficina-tech/bdd/steps"
 )
 
+// fullIntegration is true when all external services are available.
+// When false, @integration scenarios are skipped gracefully via godog.ErrSkip.
+var fullIntegration = os.Getenv("BDD_FULL_INTEGRATION") == "true"
+
 var godogOpts = godog.Options{
 	Output: colors.Colored(os.Stdout),
 	Format: "pretty",
@@ -34,7 +38,10 @@ var godogOpts = godog.Options{
 	Tags: os.Getenv("BDD_TAGS"),
 	// Stop after first failure to keep the test output focused.
 	StopOnFailure: false,
-	Strict:        true,
+	// Strict mode fails on undefined/pending steps.
+	// Disabled when not in full-integration mode so a suite of all-skipped
+	// scenarios does not exit non-zero.
+	Strict: fullIntegration,
 }
 
 func init() {
