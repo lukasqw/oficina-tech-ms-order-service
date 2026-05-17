@@ -42,3 +42,40 @@ Funcionalidade: Ciclo completo de Ordem de Serviço
     Então o MS3 recebe CANCEL_CONFIRMED
     E a OS avança para CANCELED
     E estoque retorna para available
+
+  Cenário: Ciclo completo até entrega — PAID a DELIVERED
+    Dado uma OS em COMPLETED com estoque reservado
+    Quando advance dispara criação de preferência MP (MP mock retorna preference_id)
+    Então a OS está em AWAITING_PAYMENT
+    Quando MP webhook chega com status=approved (mock dispara)
+    Então a OS está em PAID
+    Quando o mecânico avança a OS para DELIVERED
+    Então a OS está em DELIVERED
+
+  Cenário: Mecânico atualiza itens da OS em RECEIVED
+    Dado um cliente cadastrado com veículo registrado
+    E o MS3 possui estoque suficiente para todos os produtos
+    Quando o cliente abre uma OS com troca de óleo e filtro de ar
+    Então a OS é criada com status RECEIVED
+    Quando o mecânico atualiza os itens da OS
+    Então a atualização de itens é aceita
+
+  Cenário: Atualização de itens bloqueada após PENDING_AUTHORIZATION
+    Dado uma OS em PENDING_AUTHORIZATION com estoque reservado
+    Quando o mecânico tenta atualizar os itens da OS
+    Então a atualização de itens é rejeitada com erro de imutabilidade
+
+  Cenário: Histórico de status consultado via DynamoDB
+    Dado um cliente cadastrado com veículo registrado
+    E o MS3 possui estoque suficiente para todos os produtos
+    Quando o cliente abre uma OS com troca de óleo e filtro de ar
+    E o mecânico avança a OS para DIAGNOSING
+    E o mecânico avança a OS para PENDING_AUTHORIZATION
+    E o MS3 confirma a reserva com sucesso
+    E a OS avança para PENDING_AUTHORIZATION
+    Então o histórico da OS possui 2 ou mais entradas
+
+  Cenário: URL de pagamento disponível após AWAITING_PAYMENT
+    Dado uma OS em COMPLETED com estoque reservado
+    Quando advance dispara criação de preferência MP (MP mock retorna preference_id)
+    Então a OS possui URL de pagamento
