@@ -40,8 +40,8 @@ func (h *PaymentHandler) GetServiceOrderPayment(w http.ResponseWriter, r *http.R
 	}
 
 	utils.RespondSuccess(w, http.StatusOK, map[string]string{
-		"payment_url":      output.PaymentURL,
-		"mp_preference_id": output.PreferenceID,
-		"status":           output.Status,
+		"payment_url":  output.PaymentURL,
+		"mp_order_id":  output.OrderID,
+		"status":       output.Status,
 	})
 }

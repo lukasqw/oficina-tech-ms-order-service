@@ -241,7 +241,7 @@ func (s *ServiceOrder) ConfirmPayment(paymentID string) error {
 }
 
 func (s *ServiceOrder) RejectPayment() error {
-	if err := s.UpdateStatus(StatusCompleted); err != nil {
+	if err := s.UpdateStatus(StatusPaymentRejected); err != nil {
 		return err
 	}
 	s.sagaStatus = SagaStatusIdle

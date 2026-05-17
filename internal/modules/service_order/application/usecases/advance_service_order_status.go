@@ -195,13 +195,13 @@ func (uc *AdvanceServiceOrderStatus) startPayment(ctx context.Context, order *se
 	if err != nil {
 		return nil, err
 	}
-	if err := order.AwaitPayment(preference.ID, preference.InitURL); err != nil {
+	if err := order.AwaitPayment(preference.ID, preference.RedirectURL); err != nil {
 		return nil, err
 	}
 
 	metadata := service_order.BuildStatusOnlyMetadata(oldStatus, order.Status())
-	metadata["mp_preference_id"] = preference.ID
-	metadata["payment_url"] = preference.InitURL
+	metadata["mp_order_id"] = preference.ID
+	metadata["payment_url"] = preference.RedirectURL
 	history, err := service_order.NewHistory(order.ID(), metadata, order.Status())
 	if err != nil {
 		return nil, err

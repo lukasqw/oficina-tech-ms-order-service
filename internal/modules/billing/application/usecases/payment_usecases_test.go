@@ -52,7 +52,7 @@ func TestHandlePaymentWebhookApprovedTransitionsToPaid(t *testing.T) {
 	}
 }
 
-func TestHandlePaymentWebhookRejectedReturnsToCompleted(t *testing.T) {
+func TestHandlePaymentWebhookRejectedTransitionsToPaymentRejected(t *testing.T) {
 	repo := newMemoryOrderRepo(awaitingPaymentOrder(t))
 	uc := NewHandlePaymentWebhook(
 		&fakeMPClient{payment: &payment.Payment{ID: "pay-2", Status: "rejected", ExternalReference: testOrderID}},
@@ -66,12 +66,12 @@ func TestHandlePaymentWebhookRejectedReturnsToCompleted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if !output.Processed || output.Status != service_order.StatusCompleted.String() {
+	if !output.Processed || output.Status != service_order.StatusPaymentRejected.String() {
 		t.Fatalf("unexpected output: %+v", output)
 	}
 	order := repo.orders[testOrderID]
-	if order.Status() != service_order.StatusCompleted || order.SagaStatus() != service_order.SagaStatusIdle {
-		t.Fatalf("order did not return to completed: status=%s saga=%s", order.Status(), order.SagaStatus())
+	if order.Status() != service_order.StatusPaymentRejected || order.SagaStatus() != service_order.SagaStatusIdle {
+		t.Fatalf("order did not transition to PAYMENT_REJECTED: status=%s saga=%s", order.Status(), order.SagaStatus())
 	}
 }
 
@@ -245,7 +245,7 @@ func TestGetPaymentStatus(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if output.PaymentURL != "https://pay/pref-1" || output.PreferenceID != "pref-1" || output.Status != service_order.StatusAwaitingPayment.String() {
+	if output.PaymentURL != "https://pay/pref-1" || output.OrderID != "pref-1" || output.Status != service_order.StatusAwaitingPayment.String() {
 		t.Fatalf("unexpected output: %+v", output)
 	}
 }
@@ -264,9 +264,9 @@ func TestGetPaymentStatusReturnsNotFound(t *testing.T) {
 	}
 }
 
-func TestBuildPreferenceItemsFallback(t *testing.T) {
+func TestBuildOrderItemsFallback(t *testing.T) {
 	order := completedOrder(t)
-	items := BuildPreferenceItems(order)
+	items := BuildOrderItems(order)
 	if len(items) != 1 || items[0].Title == "" || items[0].Quantity != 1 {
 		t.Fatalf("unexpected fallback items: %+v", items)
 	}
@@ -288,7 +288,7 @@ func TestCreatePaymentPreferenceBuildsItemsInBRL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReconstructServiceOrder() error = %v", err)
 	}
-	client := &fakeMPClient{preference: &payment.Preference{ID: "pref", InitURL: "https://pay"}}
+	client := &fakeMPClient{order: &payment.Order{ID: "order-1", RedirectURL: "https://pay"}}
 	uc := NewCreatePaymentPreference(client)
 
 	if _, err := uc.Execute(context.Background(), order); err != nil {
@@ -300,18 +300,22 @@ func TestCreatePaymentPreferenceBuildsItemsInBRL(t *testing.T) {
 }
 
 type fakeMPClient struct {
-	preference  *payment.Preference
+	order       *payment.Order
 	payment     *payment.Payment
-	items       []payment.PreferenceItem
+	items       []payment.OrderItem
 	externalRef string
 }
 
-func (c *fakeMPClient) CreatePreference(_ context.Context, _ string, items []payment.PreferenceItem, externalRef string) (*payment.Preference, error) {
+func (c *fakeMPClient) CreateOrder(_ context.Context, items []payment.OrderItem, _ payment.PayerInfo, externalRef string) (*payment.Order, error) {
 	c.items = items
 	c.externalRef = externalRef
-	return c.preference, nil
+	return c.order, nil
 }
-
+func (c *fakeMPClient) GetOrder(context.Context, string) (*payment.Order, error)         { return nil, nil }
+func (c *fakeMPClient) CancelOrder(context.Context, string) (*payment.Order, error)      { return nil, nil }
+func (c *fakeMPClient) RefundOrder(context.Context, string, *string) (*payment.Order, error) {
+	return nil, nil
+}
 func (c *fakeMPClient) GetPayment(context.Context, string) (*payment.Payment, error) {
 	return c.payment, nil
 }

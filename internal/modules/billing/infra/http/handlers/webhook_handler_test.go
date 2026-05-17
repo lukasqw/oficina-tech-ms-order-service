@@ -27,7 +27,7 @@ func TestWebhookHandlerPaymentStatuses(t *testing.T) {
 		wantStatus service_order.OrderStatus
 	}{
 		{"approved", "approved", service_order.StatusPaid},
-		{"rejected", "rejected", service_order.StatusCompleted},
+		{"rejected", "rejected", service_order.StatusPaymentRejected},
 		{"pending", "pending", service_order.StatusAwaitingPayment},
 	}
 
@@ -173,10 +173,18 @@ type handlerMPClient struct {
 	err     error
 }
 
-func (c *handlerMPClient) CreatePreference(context.Context, string, []payment.PreferenceItem, string) (*payment.Preference, error) {
+func (c *handlerMPClient) CreateOrder(context.Context, []payment.OrderItem, payment.PayerInfo, string) (*payment.Order, error) {
 	return nil, nil
 }
-
+func (c *handlerMPClient) GetOrder(context.Context, string) (*payment.Order, error) {
+	return nil, nil
+}
+func (c *handlerMPClient) CancelOrder(context.Context, string) (*payment.Order, error) {
+	return nil, nil
+}
+func (c *handlerMPClient) RefundOrder(context.Context, string, *string) (*payment.Order, error) {
+	return nil, nil
+}
 func (c *handlerMPClient) GetPayment(context.Context, string) (*payment.Payment, error) {
 	if c.err != nil {
 		return nil, c.err

@@ -102,7 +102,7 @@ func (uc *HandlePaymentWebhook) markRejected(ctx context.Context, orderID, payme
 	if err != nil {
 		return nil, err
 	}
-	if order.Status() == service_order.StatusCompleted {
+	if order.Status() == service_order.StatusPaymentRejected {
 		return &HandlePaymentWebhookOutput{Processed: false, Status: order.Status().String(), OrderID: order.ID()}, nil
 	}
 	if order.Status() != service_order.StatusAwaitingPayment {

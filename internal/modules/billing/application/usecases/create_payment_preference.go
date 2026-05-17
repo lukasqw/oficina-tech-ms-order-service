@@ -7,6 +7,10 @@ import (
 	"oficina-tech/internal/modules/service_order/domain/service_order"
 )
 
+// CreatePaymentPreference cria um Order na Orders API do Mercado Pago para
+// uma OS que está avançando para AWAITING_PAYMENT.
+// O nome do struct é mantido por compatibilidade de wiring; o campo no Module
+// foi renomeado para CreatePaymentOrder.
 type CreatePaymentPreference struct {
 	client payment.MercadoPagoClient
 }
@@ -15,28 +19,49 @@ func NewCreatePaymentPreference(client payment.MercadoPagoClient) *CreatePayment
 	return &CreatePaymentPreference{client: client}
 }
 
-func (uc *CreatePaymentPreference) Execute(ctx context.Context, order *service_order.ServiceOrder) (*payment.Preference, error) {
-	return uc.client.CreatePreference(ctx, order.ID(), BuildPreferenceItems(order), order.ID())
+// Execute cria o Order no MP e retorna o Order com RedirectURL para o cliente.
+// PayerInfo é preenchido com o snapshot do customer persistido na OS (fase 5).
+// Enquanto os métodos de snapshot não existem no domínio, PayerInfo usa campos vazios.
+func (uc *CreatePaymentPreference) Execute(ctx context.Context, order *service_order.ServiceOrder) (*payment.Order, error) {
+	items := BuildOrderItems(order)
+	payer := buildPayerInfo(order)
+	return uc.client.CreateOrder(ctx, items, payer, order.ID())
 }
 
-func BuildPreferenceItems(order *service_order.ServiceOrder) []payment.PreferenceItem {
-	items := make([]payment.PreferenceItem, 0, len(order.Items()))
+func BuildOrderItems(order *service_order.ServiceOrder) []payment.OrderItem {
+	items := make([]payment.OrderItem, 0, len(order.Items()))
 	for _, item := range order.Items() {
 		if item.IsDeleted() {
 			continue
 		}
-		items = append(items, payment.PreferenceItem{
+		items = append(items, payment.OrderItem{
 			Title:     item.Name(),
 			Quantity:  item.Quantity(),
 			UnitPrice: float64(item.UnitPrice()) / 100,
 		})
 	}
 	if len(items) == 0 {
-		items = append(items, payment.PreferenceItem{
+		items = append(items, payment.OrderItem{
 			Title:     "Ordem de Serviço " + order.ID(),
 			Quantity:  1,
 			UnitPrice: float64(order.TotalAmount()) / 100,
 		})
 	}
 	return items
+}
+
+// buildPayerInfo constrói o PayerInfo a partir do snapshot do customer na OS.
+// Os métodos CustomerEmail/CPF/Name serão adicionados ao domínio na fase 5.
+func buildPayerInfo(order *service_order.ServiceOrder) payment.PayerInfo {
+	payer := payment.PayerInfo{}
+	if m, ok := any(order).(interface {
+		CustomerEmail() string
+		CustomerCPF() string
+		CustomerName() string
+	}); ok {
+		payer.Email = m.CustomerEmail()
+		payer.CPF = m.CustomerCPF()
+		payer.Name = m.CustomerName()
+	}
+	return payer
 }

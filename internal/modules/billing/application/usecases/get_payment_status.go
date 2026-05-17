@@ -8,9 +8,9 @@ import (
 )
 
 type GetPaymentStatusOutput struct {
-	PaymentURL   string
-	PreferenceID string
-	Status       string
+	PaymentURL string
+	OrderID    string // MP Order ID (antes: PreferenceID)
+	Status     string
 }
 
 type GetPaymentStatus struct {
@@ -33,8 +33,8 @@ func (uc *GetPaymentStatus) Execute(ctx context.Context, serviceOrderID string) 
 		return nil, payment.ErrPaymentURLNotAvailable
 	}
 	return &GetPaymentStatusOutput{
-		PaymentURL:   *order.PaymentURL(),
-		PreferenceID: *order.MPPreferenceID(),
-		Status:       order.Status().String(),
+		PaymentURL: *order.PaymentURL(),
+		OrderID:    *order.MPPreferenceID(), // MPPreferenceID contém o MP Order ID após a migration 003
+		Status:     order.Status().String(),
 	}, nil
 }
