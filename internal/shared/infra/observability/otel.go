@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -36,8 +37,12 @@ func InitOTel(ctx context.Context) (shutdown func(context.Context) error, err er
 	if endpoint == "" {
 		endpoint = "localhost:4317"
 	}
+	endpoint = strings.TrimPrefix(strings.TrimPrefix(endpoint, "https://"), "http://")
 
-	serviceName := "oficina-tech"
+	serviceName := os.Getenv("OTEL_SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = "ms-order-service"
+	}
 	serviceVersion := os.Getenv("APP_VERSION")
 	if serviceVersion == "" {
 		serviceVersion = "dev"
