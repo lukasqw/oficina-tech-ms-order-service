@@ -22,6 +22,7 @@ type SDKClient struct {
 	paymentClient   sdkpayment.Client
 	notificationURL string
 	callbackBaseURL string
+	isSandbox       bool // true when MP_ACCESS_TOKEN starts with "TEST-"
 }
 
 // NewSDKClient cria um SDKClient com as credenciais e opções fornecidas.
@@ -36,9 +37,10 @@ func NewSDKClient(accessToken, notificationURL, callbackBaseURL string, opts ...
 	}
 	return &SDKClient{
 		orderClient:     sdkorder.NewClient(cfg),
-		paymentClient:  sdkpayment.NewClient(cfg),
+		paymentClient:   sdkpayment.NewClient(cfg),
 		notificationURL: notificationURL,
 		callbackBaseURL: strings.TrimRight(callbackBaseURL, "/"),
+		isSandbox:       strings.HasPrefix(accessToken, "TEST-"),
 	}, nil
 }
 
@@ -60,6 +62,11 @@ func NewSDKClientFromEnv() (*SDKClient, error) {
 
 // CreateOrder cria um Order "online" (Checkout Pro redirect) na Orders API do MP.
 func (c *SDKClient) CreateOrder(ctx context.Context, items []payment.OrderItem, payer payment.PayerInfo, externalRef string) (*payment.Order, error) {
+	// Sandbox MP rejeita emails fora do domínio @testuser.com.
+	if c.isSandbox {
+		payer.Email = "test.buyer@testuser.com"
+	}
+
 	sdkItems := make([]sdkorder.ItemsRequest, 0, len(items))
 	for _, item := range items {
 		sdkItems = append(sdkItems, sdkorder.ItemsRequest{
