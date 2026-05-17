@@ -145,14 +145,25 @@ runs:
         HEALTH_ENDPOINT: ${{ inputs.health_endpoint }}
       run: |
         echo "::notice::Waiting for pods to be Ready (timeout: 5m)..."
-        if ! kubectl wait --for=condition=ready pod \
-          -l "app=$APP_NAME" \
-          -n "$NAMESPACE" \
-          --timeout=300s; then
+        # Pre-filter non-terminating pods only — avoids NotFound errors when
+        # the rolling update deletes old pods while kubectl wait is still running.
+        RUNNING_PODS=$(kubectl get pods -n "$NAMESPACE" -l "app=$APP_NAME" -o json \
+          | jq -r '.items[] | select(.metadata.deletionTimestamp == null) | .metadata.name')
+
+        if [ -z "$RUNNING_PODS" ]; then
           echo "::error::Pods not ready within timeout"
           kubectl get pods -n "$NAMESPACE" -o wide
           exit 1
         fi
+
+        for POD_NAME in $RUNNING_PODS; do
+          if ! kubectl wait pod "$POD_NAME" -n "$NAMESPACE" \
+            --for=condition=ready --timeout=300s; then
+            echo "::error::Pods not ready within timeout"
+            kubectl get pods -n "$NAMESPACE" -o wide
+            exit 1
+          fi
+        done
 
         # Exclude terminating pods (deletionTimestamp set) — rolling update leaves old pods
         # in Ready+Terminating state which causes Connection refused on health check
