@@ -318,8 +318,20 @@ func (c *fakeMPClient) CancelOrder(context.Context, string) (*payment.Order, err
 func (c *fakeMPClient) RefundOrder(context.Context, string, *string) (*payment.Order, error) {
 	return nil, nil
 }
-func (c *fakeMPClient) GetPayment(context.Context, string) (*payment.Payment, error) {
-	return c.payment, nil
+func (c *fakeMPClient) GetPayment(_ context.Context, id string) (*payment.Payment, error) {
+	if c.payment != nil {
+		return c.payment, nil
+	}
+	// Deriva o Payment do order configurado nos testes que usam c.order.
+	if c.order != nil {
+		return &payment.Payment{
+			ID:                id,
+			Status:            c.order.PaymentStatus,
+			StatusDetail:      c.order.PaymentStatusDetail,
+			ExternalReference: c.order.ExternalReference,
+		}, nil
+	}
+	return nil, nil
 }
 
 type fakeCustomerAdapter struct {

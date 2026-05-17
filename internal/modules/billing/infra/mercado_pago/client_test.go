@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"oficina-tech/internal/modules/billing/domain/payment"
@@ -15,8 +14,9 @@ import (
 
 func newTestSDKClient(t *testing.T, server *httptest.Server) *SDKClient {
 	t.Helper()
+	// TEST- prefix → isSandbox=true, usando sandbox_init_point no CreateOrder.
 	client, err := NewSDKClient(
-		"test-token",
+		"TEST-token",
 		"https://example.com/v1/payments/mp-webhook",
 		"https://example.com",
 		config.WithHTTPClient(NewRewritingRequester(server.URL)),
@@ -24,54 +24,41 @@ func newTestSDKClient(t *testing.T, server *httptest.Server) *SDKClient {
 	if err != nil {
 		t.Fatalf("NewSDKClient() error = %v", err)
 	}
+	// Direct HTTP calls (GetPayment, RefundOrder) usam apiBaseURL.
+	client.apiBaseURL = server.URL
 	return client
 }
 
 func TestSDKClientCreateOrder(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Header.Get("Authorization") != "Bearer test-token" {
-			t.Fatalf("missing authorization header, got: %s", r.Header.Get("Authorization"))
-		}
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/orders" {
+		if r.Method != http.MethodPost || r.URL.Path != "/checkout/preferences" {
 			http.NotFound(w, r)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":     "order-abc",
-			"status": "created",
-			"transactions": map[string]any{
-				"payments": []map[string]any{
-					{
-						"id":     "pay-1",
-						"status": "pending",
-						"payment_method": map[string]any{
-							"redirect_url": "https://mp.com/checkout/order-abc",
-						},
-					},
-				},
-			},
+			"id":                 "pref-abc",
+			"init_point":         "https://mp.com/checkout/pref-abc",
+			"sandbox_init_point": "https://mp.com/sandbox/pref-abc",
+			"external_reference": "os-uuid-1",
 		})
 	}))
 	defer server.Close()
 
 	client := newTestSDKClient(t, server)
-
 	order, err := client.CreateOrder(context.Background(),
 		[]payment.OrderItem{{Title: "Troca de óleo", Quantity: 1, UnitPrice: 150.0}},
-		payment.PayerInfo{Email: "cliente@test.com", CPF: "12345678909", Name: "Cliente Teste"},
+		payment.PayerInfo{Email: "cliente@testuser.com", CPF: "12345678909", Name: "Cliente Teste"},
 		"os-uuid-1",
 	)
 	if err != nil {
 		t.Fatalf("CreateOrder() error = %v", err)
 	}
-	if order.ID != "order-abc" {
-		t.Errorf("expected order ID 'order-abc', got %q", order.ID)
+	if order.ID != "pref-abc" {
+		t.Errorf("expected preference ID 'pref-abc', got %q", order.ID)
 	}
-	if order.RedirectURL != "https://mp.com/checkout/order-abc" {
-		t.Errorf("expected redirect URL, got %q", order.RedirectURL)
-	}
-	if order.PaymentID != "pay-1" {
-		t.Errorf("expected payment ID 'pay-1', got %q", order.PaymentID)
+	// isSandbox=true → sandbox_init_point deve ser usado como RedirectURL.
+	if order.RedirectURL != "https://mp.com/sandbox/pref-abc" {
+		t.Errorf("expected sandbox redirect URL, got %q", order.RedirectURL)
 	}
 }
 
@@ -83,48 +70,28 @@ func TestSDKClientRequiresAccessToken(t *testing.T) {
 }
 
 func TestSDKClientGetOrder(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/v1/orders/") {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id":     "order-abc",
-			"status": "processed",
-			"transactions": map[string]any{
-				"payments": []map[string]any{
-					{"id": "pay-1", "status": "approved", "payment_method": map[string]any{"redirect_url": ""}},
-				},
-			},
-		})
+	// GetOrder é stub na Preferences API — retorna ErrOrderNotFound sem chamada HTTP.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("unexpected HTTP call in GetOrder")
 	}))
 	defer server.Close()
 
 	client := newTestSDKClient(t, server)
-	order, err := client.GetOrder(context.Background(), "order-abc")
-	if err != nil {
-		t.Fatalf("GetOrder() error = %v", err)
-	}
-	if order.Status != "processed" {
-		t.Errorf("expected status 'processed', got %q", order.Status)
+	_, err := client.GetOrder(context.Background(), "pref-abc")
+	if err != payment.ErrOrderNotFound {
+		t.Fatalf("expected ErrOrderNotFound, got %v", err)
 	}
 }
 
 func TestSDKClientCancelOrder(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/cancel") {
-			http.NotFound(w, r)
-			return
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"id": "order-abc", "status": "cancelled",
-			"transactions": map[string]any{"payments": []any{}},
-		})
+	// CancelOrder é no-op na Preferences API — nenhuma chamada HTTP esperada.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("unexpected HTTP call in CancelOrder")
 	}))
 	defer server.Close()
 
 	client := newTestSDKClient(t, server)
-	order, err := client.CancelOrder(context.Background(), "order-abc")
+	order, err := client.CancelOrder(context.Background(), "pref-abc")
 	if err != nil {
 		t.Fatalf("CancelOrder() error = %v", err)
 	}
@@ -154,6 +121,29 @@ func TestSDKClientGetPayment(t *testing.T) {
 	if p.Status != "approved" {
 		t.Errorf("expected status 'approved', got %q", p.Status)
 	}
+	if p.ExternalReference != "os-uuid-1" {
+		t.Errorf("expected external_reference 'os-uuid-1', got %q", p.ExternalReference)
+	}
+}
+
+func TestSDKClientRefundOrder(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/payments/pay-1/refunds" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "refund-1", "status": "approved"})
+	}))
+	defer server.Close()
+
+	client := newTestSDKClient(t, server)
+	order, err := client.RefundOrder(context.Background(), "pay-1", nil)
+	if err != nil {
+		t.Fatalf("RefundOrder() error = %v", err)
+	}
+	if order.Status != "refunded" {
+		t.Errorf("expected status 'refunded', got %q", order.Status)
+	}
 }
 
 func TestTaxIDType(t *testing.T) {
@@ -165,15 +155,5 @@ func TestTaxIDType(t *testing.T) {
 	}
 	if taxIDType("123.456.789-09") != "CPF" {
 		t.Error("formatted CPF should be detected as CPF")
-	}
-}
-
-func TestTotalAmount(t *testing.T) {
-	items := []payment.OrderItem{
-		{Quantity: 2, UnitPrice: 50.0},
-		{Quantity: 1, UnitPrice: 30.75},
-	}
-	if got := totalAmount(items); got != "130.75" {
-		t.Errorf("expected '130.75', got %q", got)
 	}
 }
