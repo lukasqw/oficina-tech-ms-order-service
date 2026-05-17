@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__plugin_context-mode_context-mode__ctx_batch_execute",
+      "mcp__plugin_context-mode_context-mode__ctx_search",
+      "Bash(go build *)",
+      "Bash(go test *)",
+      "Bash(go list *)",
+      "Bash(grep -vE \"/internal/modules/service_order$|/internal/modules/service_order/infra/http$|/internal/modules/service_order/infra/http/dto$|/internal/modules/service_order/infra/persistence$|/internal/modules/service_order/infra/adapters$|/internal/modules/service_order/infra/adapters/implementations$|/internal/shared/dto$|/internal/shared/infra/awsconfig$|/internal/shared/infra/database$|/internal/shared/infra/dynamodb$|/internal/shared/infra/email$|/internal/shared/infra/sqs$|/internal/messaging/events$\")",
+      "Bash(go tool *)"
+    ]
+  }
+}

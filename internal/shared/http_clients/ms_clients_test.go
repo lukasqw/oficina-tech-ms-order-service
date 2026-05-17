@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"oficina-tech/internal/shared/infra/http/middleware"
@@ -41,6 +42,63 @@ func TestMS1ClientMaps404(t *testing.T) {
 	_, err := NewMS1ClientWithBaseURL(server.URL).GetVehicleByID(context.Background(), "missing")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestNewMS1Client_NotNil(t *testing.T) {
+	c := NewMS1Client()
+	if c == nil {
+		t.Fatal("expected non-nil MS1Client")
+	}
+}
+
+func TestNewMS3Client_NotNil(t *testing.T) {
+	c := NewMS3Client()
+	if c == nil {
+		t.Fatal("expected non-nil MS3Client")
+	}
+}
+
+func TestRetryableStatusError_ErrorMessage(t *testing.T) {
+	e := retryableStatusError{status: 503}
+	msg := e.Error()
+	if msg == "" {
+		t.Fatal("expected non-empty error message")
+	}
+	if !strings.Contains(msg, "503") {
+		t.Errorf("expected error message to contain '503', got %q", msg)
+	}
+}
+
+func TestMS3ClientGetServiceByID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"id":"service-1","name":"Troca de Óleo","description":"desc","price":10000},"errors":[]}`))
+	}))
+	defer server.Close()
+
+	svc, err := NewMS3ClientWithBaseURL(server.URL).GetServiceByID(context.Background(), "service-1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if svc.Name != "Troca de Óleo" {
+		t.Errorf("expected service name, got %s", svc.Name)
+	}
+}
+
+func TestMS1ClientGetVehicleByID_Success(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"id":"v-1","customer_id":"c-1","license_plate":"ABC-1234","brand":"Toyota","model":"Corolla","model_year":2023,"manufacture_year":2022},"errors":[]}`))
+	}))
+	defer server.Close()
+
+	v, err := NewMS1ClientWithBaseURL(server.URL).GetVehicleByID(context.Background(), "v-1")
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if v.Brand != "Toyota" {
+		t.Errorf("expected Brand Toyota, got %s", v.Brand)
 	}
 }
 
