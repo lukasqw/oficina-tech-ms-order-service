@@ -10,7 +10,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"oficina-tech/internal/messaging/events"
+	"oficina-tech/internal/shared/infra/observability"
 )
 
 type InventorySagaFailedHandler interface {
@@ -34,9 +38,10 @@ func (c *OrderInventoryOperationFailedConsumer) Start(ctx context.Context) error
 			return err
 		}
 		output, err := c.client.ReceiveMessage(ctx, &sqs.ReceiveMessageInput{
-			QueueUrl:            aws.String(c.queueURL),
-			WaitTimeSeconds:     20,
-			MaxNumberOfMessages: 10,
+			QueueUrl:              aws.String(c.queueURL),
+			WaitTimeSeconds:       20,
+			MaxNumberOfMessages:   10,
+			MessageAttributeNames: []string{"All"},
 		})
 		if err != nil {
 			return fmt.Errorf("receive inventory failure messages: %w", err)
@@ -50,17 +55,31 @@ func (c *OrderInventoryOperationFailedConsumer) Start(ctx context.Context) error
 }
 
 func (c *OrderInventoryOperationFailedConsumer) HandleMessage(ctx context.Context, message types.Message) error {
+	opts := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindConsumer)}
+	if link, ok := observability.ExtractSpanLinkFromSQS(message); ok {
+		opts = append(opts, trace.WithLinks(link))
+	}
+	ctx, span := otel.Tracer("oficina-tech/messaging").Start(ctx,
+		"consume "+events.EventOrderInventoryOperationFailed, opts...)
+	defer span.End()
+
 	event, err := decodeFailed(message)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 
 	current, err := c.handler.IsCurrentSaga(ctx, event.OrderID, event.SagaID)
 	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
 		return err
 	}
 	if current {
 		if err := c.handler.HandleFailed(ctx, event); err != nil {
+			span.RecordError(err)
+			span.SetStatus(codes.Error, err.Error())
 			return err
 		}
 	}
