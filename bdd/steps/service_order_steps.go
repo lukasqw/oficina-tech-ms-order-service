@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -36,7 +37,17 @@ func RegisterSuite(ctx *godog.TestSuiteContext) {
 func RegisterScenario(ctx *godog.ScenarioContext) {
 	w := newWorld()
 
-	ctx.Before(func(c context.Context, _ *godog.Scenario) (context.Context, error) {
+	ctx.Before(func(c context.Context, sc *godog.Scenario) (context.Context, error) {
+		// Quando BDD_FULL_INTEGRATION != "true", pula cenários @integration
+		// sem falhar o pipeline — útil quando os MSs externos não estão no ar.
+		if os.Getenv("BDD_FULL_INTEGRATION") != "true" {
+			for _, tag := range sc.Tags {
+				if tag.Name == "@integration" {
+					return c, godog.ErrSkip
+				}
+			}
+		}
+
 		token, err := adminToken(c, w)
 		if err != nil {
 			return c, err

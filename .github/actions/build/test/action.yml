@@ -16,6 +16,38 @@ inputs:
     description: 'Application name — used as binary filename (e.g. oficina-tech)'
     required: false
     default: 'app'
+  bdd_full_integration:
+    description: 'Set to true to run the full BDD suite (requires MS1, MS2, MS3 and MP mock live)'
+    required: false
+    default: 'false'
+  ms1_url:
+    description: 'MS1 base URL for BDD'
+    required: false
+    default: 'http://localhost:8081'
+  ms2_url:
+    description: 'MS2 base URL for BDD'
+    required: false
+    default: 'http://localhost:8082'
+  ms3_url:
+    description: 'MS3 base URL for BDD'
+    required: false
+    default: 'http://localhost:8083'
+  mp_mock_url:
+    description: 'Mercado Pago mock URL for BDD'
+    required: false
+    default: 'http://localhost:9999'
+  mp_webhook_secret:
+    description: 'MP webhook signing secret for BDD'
+    required: false
+    default: 'e2e-webhook-secret'
+  admin_email:
+    description: 'Admin email for BDD auth'
+    required: false
+    default: 'admin@oficina.test'
+  admin_password:
+    description: 'Admin password for BDD auth'
+    required: false
+    default: 'admin1234'
 
 outputs:
   version:
@@ -54,7 +86,24 @@ runs:
       shell: bash
       run: |
         go mod download
-        go test ./internal/... -v -coverprofile=coverage.out -covermode=atomic 2>&1 | tee /tmp/test-output.txt
+        # Exclude infra-only and live-dependency packages from coverage.
+        # Criteria: wiring/DI facades, pure-struct packages, packages that require
+        # a live AWS/DB/SMTP endpoint and cannot be tested with mocks.
+        PKGS=$(go list ./internal/... | grep -vE \
+          '/internal/modules/service_order$|\
+/internal/modules/service_order/infra/http$|\
+/internal/modules/service_order/infra/http/dto$|\
+/internal/modules/service_order/infra/persistence$|\
+/internal/modules/service_order/infra/adapters$|\
+/internal/modules/service_order/infra/adapters/implementations$|\
+/internal/shared/dto$|\
+/internal/shared/infra/awsconfig$|\
+/internal/shared/infra/database$|\
+/internal/shared/infra/dynamodb$|\
+/internal/shared/infra/email$|\
+/internal/shared/infra/sqs$|\
+/internal/messaging/events$')
+        go test ${PKGS} -v -coverprofile=coverage.out -covermode=atomic 2>&1 | tee /tmp/test-output.txt
         echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_ENV
 
     - name: Coverage Summary
@@ -139,8 +188,24 @@ runs:
         fi
         COVERAGE=$(go tool cover -func=coverage.out | awk '/total:/ { sub(/%/, "", $3); print $3 }')
         echo "Coverage: ${COVERAGE}%"
-        awk -v coverage="$COVERAGE" 'BEGIN { exit !(coverage >= 5.0) }' || \
-          (echo "::error::Coverage ${COVERAGE}% is below the 5% threshold" && exit 1)
+        awk -v coverage="$COVERAGE" 'BEGIN { exit !(coverage >= 80.0) }' || \
+          (echo "::error::Coverage ${COVERAGE}% is below the 80% threshold" && exit 1)
+
+    - name: Run BDD Tests
+      shell: bash
+      run: |
+        go test ./bdd/... -count=1 -v 2>&1 | tail -40
+        # Exit code is always 0 when BDD_FULL_INTEGRATION is not set
+        # (all @integration scenarios are skipped gracefully).
+      env:
+        BDD_FULL_INTEGRATION: ${{ inputs.bdd_full_integration }}
+        MS1_URL: ${{ inputs.ms1_url }}
+        MS2_URL: ${{ inputs.ms2_url }}
+        MS3_URL: ${{ inputs.ms3_url }}
+        MP_MOCK_URL: ${{ inputs.mp_mock_url }}
+        MP_WEBHOOK_SECRET: ${{ inputs.mp_webhook_secret }}
+        ADMIN_EMAIL: ${{ inputs.admin_email }}
+        ADMIN_PASSWORD: ${{ inputs.admin_password }}
 
     - name: Build Binary
       shell: bash
