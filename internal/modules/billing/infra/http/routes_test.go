@@ -14,7 +14,7 @@ func TestRegisterBillingRoutes(t *testing.T) {
 	RegisterBillingRoutes(
 		mux,
 		handlers.NewWebhookHandler(nil, nil),
-		handlers.NewPaymentHandler(nil),
+		handlers.NewPaymentHandler(nil, nil),
 		middleware.NewAuthMiddleware(jwtAuth.NewJWTService()),
 		middleware.NewRBACMiddleware(),
 	)

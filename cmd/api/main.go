@@ -234,7 +234,7 @@ func registerServiceOrderRoutes(mux *http.ServeMux, dynamoClient *shareddynamo.C
 	billingHttp.RegisterBillingRoutes(
 		mux,
 		billingHandlers.NewWebhookHandler(billing.SignatureValidator, billing.HandlePaymentWebhook),
-		billingHandlers.NewPaymentHandler(billing.GetPaymentStatus),
+		billingHandlers.NewPaymentHandler(billing.GetPaymentStatus, billing.RetryPayment),
 		authMiddleware,
 		rbacMiddleware,
 	)
