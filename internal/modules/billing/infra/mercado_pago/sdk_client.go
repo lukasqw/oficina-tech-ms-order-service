@@ -78,9 +78,16 @@ func (c *SDKClient) CreateOrder(ctx context.Context, items []payment.OrderItem, 
 		Currency:          "BRL",
 		Items:             sdkItems,
 		Payer:             buildSDKPayer(payer),
+		// wallet_purchase triggers an MP-hosted redirect without requiring a card token;
+		// the response carries the checkout URL in transactions.payments[0].payment_method.redirect_url.
 		Transactions: &sdkorder.TransactionRequest{
 			Payments: []sdkorder.PaymentRequest{
-				{Amount: total},
+				{
+					Amount: total,
+					PaymentMethod: &sdkorder.PaymentMethodRequest{
+						Type: "wallet_purchase",
+					},
+				},
 			},
 		},
 		Config: &sdkorder.ConfigRequest{
