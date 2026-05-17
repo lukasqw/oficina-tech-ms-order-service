@@ -188,7 +188,18 @@ func (c *handlerMPClient) CancelOrder(context.Context, string) (*payment.Order, 
 func (c *handlerMPClient) RefundOrder(context.Context, string, *string) (*payment.Order, error) {
 	return nil, nil
 }
-func (c *handlerMPClient) GetPayment(context.Context, string) (*payment.Payment, error) {
+func (c *handlerMPClient) GetPayment(_ context.Context, id string) (*payment.Payment, error) {
+	if c.err != nil {
+		return nil, c.err
+	}
+	if c.order != nil {
+		return &payment.Payment{
+			ID:                id,
+			Status:            c.order.PaymentStatus,
+			StatusDetail:      c.order.PaymentStatusDetail,
+			ExternalReference: c.order.ExternalReference,
+		}, nil
+	}
 	return nil, nil
 }
 

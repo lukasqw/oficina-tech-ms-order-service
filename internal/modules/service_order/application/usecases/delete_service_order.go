@@ -88,9 +88,14 @@ func (uc *DeleteServiceOrder) Execute(ctx context.Context, input DeleteServiceOr
 			}
 		}
 	case service_order.StatusPaid:
-		// OS paga: solicita refund. Falha BLOQUEIA o cancelamento.
-		if uc.refundPaymentOrder != nil && mpOrderID != "" {
-			if err := uc.refundPaymentOrder.Execute(ctx, mpOrderID); err != nil {
+		// OS paga: solicita refund usando o payment ID (não o preference ID).
+		// Falha BLOQUEIA o cancelamento.
+		mpPaymentID := ""
+		if existingOrder.MPPaymentID() != nil {
+			mpPaymentID = *existingOrder.MPPaymentID()
+		}
+		if uc.refundPaymentOrder != nil && mpPaymentID != "" {
+			if err := uc.refundPaymentOrder.Execute(ctx, mpPaymentID); err != nil {
 				span.RecordError(err)
 				return nil, err
 			}
