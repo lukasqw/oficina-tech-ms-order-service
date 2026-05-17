@@ -166,7 +166,7 @@ func (c *SDKClient) RefundOrder(ctx context.Context, paymentID string, amount *s
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", payment.ErrOrderNotRefundable, err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("%w: HTTP %d", payment.ErrOrderNotRefundable, resp.StatusCode)
@@ -188,7 +188,7 @@ func (c *SDKClient) GetPayment(ctx context.Context, paymentID string) (*payment.
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, payment.ErrOrderNotFound
