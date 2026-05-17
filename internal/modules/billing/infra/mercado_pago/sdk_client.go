@@ -70,13 +70,19 @@ func (c *SDKClient) CreateOrder(ctx context.Context, items []payment.OrderItem, 
 		})
 	}
 
+	total := totalAmount(items)
 	req := sdkorder.Request{
 		Type:              "online",
-		TotalAmount:       totalAmount(items),
+		TotalAmount:       total,
 		ExternalReference: externalRef,
 		Currency:          "BRL",
 		Items:             sdkItems,
-		Payer: buildSDKPayer(payer),
+		Payer:             buildSDKPayer(payer),
+		Transactions: &sdkorder.TransactionRequest{
+			Payments: []sdkorder.PaymentRequest{
+				{Amount: total},
+			},
+		},
 		Config: &sdkorder.ConfigRequest{
 			Online: &sdkorder.OnlineConfigRequest{
 				CallbackURL: c.notificationURL,

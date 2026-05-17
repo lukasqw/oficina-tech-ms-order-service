@@ -18,6 +18,13 @@ func (h *ResultHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	orderID := r.URL.Query().Get("order")
 
+	switch status {
+	case "success", "pending", "failure":
+	default:
+		http.Error(w, `{"errors":[{"code":"VALIDATION_FAILED","message":"status inválido: use success, pending ou failure"}]}`, http.StatusBadRequest)
+		return
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusOK)
 
@@ -32,7 +39,7 @@ func (h *ResultHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			"Seu pagamento está sendo processado.",
 			"A ordem de serviço <strong>"+orderID+"</strong> aguarda confirmação.",
 			"Você será notificado por e-mail quando o pagamento for confirmado.")
-	default:
+	case "failure":
 		_, _ = fmt.Fprintf(w, resultHTML, "Pagamento não Concluído", "#ef4444",
 			"Não foi possível processar o pagamento.",
 			"A ordem de serviço <strong>"+orderID+"</strong> continua disponível.",
