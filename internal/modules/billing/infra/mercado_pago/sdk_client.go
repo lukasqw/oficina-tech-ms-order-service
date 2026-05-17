@@ -78,14 +78,15 @@ func (c *SDKClient) CreateOrder(ctx context.Context, items []payment.OrderItem, 
 		Currency:          "BRL",
 		Items:             sdkItems,
 		Payer:             buildSDKPayer(payer),
-		// wallet_purchase triggers an MP-hosted redirect without requiring a card token;
-		// the response carries the checkout URL in transactions.payments[0].payment_method.redirect_url.
+		// account_money: único tipo que não exige token de cartão e gera redirect_url na resposta.
+		// O id deve ser o mesmo valor do type para este método.
 		Transactions: &sdkorder.TransactionRequest{
 			Payments: []sdkorder.PaymentRequest{
 				{
 					Amount: total,
 					PaymentMethod: &sdkorder.PaymentMethodRequest{
-						Type: "wallet_purchase",
+						ID:   "account_money",
+						Type: "account_money",
 					},
 				},
 			},
