@@ -44,6 +44,16 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ignora tipos de webhook que não são pagamentos (ex.: topic_merchant_order_wh).
+	// Retorna 200 para evitar retentativas desnecessárias do MP.
+	if payload.Type != "" && payload.Type != "payment" {
+		log.Info("mp_webhook: tipo ignorado",
+			slog.String("webhook_type", payload.Type),
+		)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	paymentID := r.URL.Query().Get("data.id")
 	if paymentID == "" {
 		paymentID = stringifyID(payload.Data.ID)
