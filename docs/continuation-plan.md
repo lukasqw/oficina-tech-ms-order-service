@@ -18,8 +18,8 @@
 | 6 — HTTP | ✅ | `ec16b65` | ResultHandler (GET /payments/result), RetryPayment (POST /service-orders/{id}/retry-payment) |
 | 7 — Saga Cancel/Refund | ✅ | `ee96776` | DeleteServiceOrder integra CancelPaymentOrder/RefundPaymentOrder antes do saga |
 | 8 — Mock BDD | ✅ | `2898ebe` | mockmp reescrito para Orders API (/v1/orders/*), webhook com HMAC |
-| **9 — BDD** | ⏳ | — | Pendente |
-| **10 — Docs** | ⏳ | — | Pendente |
+| **9 — BDD** | ✅ | — | payment_steps.go reescrito (lookupOrderID, Orders API webhook, 3 novos cenários); feature file atualizado |
+| **10 — Docs** | ✅ | — | README.md MS2, docs/architecture.md MS2, docs/business-rules.md MS2 (criados); root business-rules.md e architecture.md atualizados |
 
 ---
 

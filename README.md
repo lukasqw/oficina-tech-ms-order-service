@@ -2,16 +2,16 @@
 
 **MS2 — OS Service (Saga Orchestrator)**
 
-Microsserviço central da plataforma Oficina Tech. Gerencia o ciclo de vida completo das ordens de serviço (OS), orquestra o Saga Pattern de controle de estoque com o MS3 via SQS, integra com o Mercado Pago para pagamentos e notifica clientes por email a cada transição de status.
+Microsserviço central da plataforma Oficina Tech. Gerencia o ciclo de vida completo das ordens de serviço (OS), orquestra o Saga Pattern de controle de estoque com o MS3 via SQS, integra com o Mercado Pago via SDK Go (Orders API) para criação de pagamentos, processamento de webhook, cancelamento e estorno, e notifica clientes por email a cada transição de status.
 
 ---
 
 ## Responsabilidades
 
-- Criar e gerenciar ordens de serviço com máquina de estados estrita (11 estados)
+- Criar e gerenciar ordens de serviço com máquina de estados estrita (12 estados)
 - Orquestrar operações de estoque no MS3 via Saga Pattern assíncrono (SQS)
-- Integrar com Mercado Pago: criação de preferência de pagamento, processamento de webhook, validação de assinatura
-- Validar cliente e veículo no MS1 via REST na criação da OS (snapshot)
+- Integrar com Mercado Pago via SDK Go (Orders API): criação de Order de pagamento, webhook, cancelamento e estorno
+- Validar cliente e veículo no MS1 via REST na criação da OS (snapshot de email/nome/CPF)
 - Capturar snapshot de preço de produtos e serviços do MS3 na criação da OS
 - Cancelar automaticamente OS ativas ao receber evento `customer-deleted` do MS1
 - Registrar histórico de transições de status no DynamoDB
@@ -115,11 +115,14 @@ Integração com Mercado Pago para o fluxo de pagamento.
 
 | Use Case | Descrição |
 |----------|-----------|
-| `CreatePaymentPreference` | Cria preferência de pagamento no Mercado Pago na transição `COMPLETED → AWAITING_PAYMENT`; persiste `mp_preference_id` e `payment_url` na OS |
-| `GetPaymentStatus` | Retorna `payment_url`, `mp_preference_id` e `status` de pagamento de uma OS |
-| `HandlePaymentWebhook` | Processa notificação recebida do Mercado Pago; valida assinatura via `x-signature` + `MP_WEBHOOK_SECRET`; atualiza `mp_payment_id` e avança OS para `PAID` |
+| `CreatePaymentOrder` | Cria Order no Mercado Pago (SDK Go, Orders API) na transição `COMPLETED → AWAITING_PAYMENT`; usa snapshot de customer (email/nome) persistido na OS; persiste `mp_order_id` e `payment_url` |
+| `HandlePaymentWebhook` | Processa notificação da Orders API (`data.id = order_id`); valida HMAC-SHA256 via `x-signature` + `MP_WEBHOOK_SECRET`; avança OS para `PAID` (approved) ou `PAYMENT_REJECTED` (rejected) |
+| `GetPaymentStatus` | Retorna `payment_url`, `mp_order_id` e `status` de pagamento de uma OS |
+| `RetryPayment` | Cria novo Order MP para OS em `PAYMENT_REJECTED`; cancela order anterior no MP; retorna OS para `AWAITING_PAYMENT` |
+| `CancelPaymentOrder` | Cancela Order no MP (`POST /v1/orders/{id}/cancel`) antes de transicionar OS para `CANCELED`; aplicável em `AWAITING_PAYMENT` e `PAYMENT_REJECTED` |
+| `RefundPaymentOrder` | Estorna Order pago no MP (`POST /v1/orders/{id}/refund`) antes de transicionar OS em `PAID` para `CANCELED`; falha bloqueia a transição |
 
-`infra/mercado_pago/` contém: `client.go` (HTTP client), `dtos.go`, `signature_validator.go` e `noop_client.go` (para testes).
+`infra/mercado_pago/` contém: `sdk_client.go` (SDK Go wrapper), `requester.go` (base URL override para BDD), `signature_validator.go` e `noop_client.go` (para testes sem token).
 
 ### access_control
 
@@ -133,8 +136,8 @@ Validação local de JWT (HS256). Não realiza chamadas ao MS1 em tempo de execu
 
 ```
 RECEIVED, DIAGNOSING, PENDING_AUTHORIZATION, AUTHORIZED,
-IN_PROGRESS, COMPLETED, AWAITING_PAYMENT, PAID, DELIVERED,
-CANCELED, AUTHORIZATION_DENIED
+IN_PROGRESS, COMPLETED, AWAITING_PAYMENT, PAYMENT_REJECTED,
+PAID, DELIVERED, CANCELED, AUTHORIZATION_DENIED
 ```
 
 **Diagrama de transições:**
@@ -161,14 +164,14 @@ IN_PROGRESS
     │           aguarda order-inventory-op-succeeded/failed
     ▼
 COMPLETED
-    │ advance → cria preferência Mercado Pago
+    │ advance → cria Order no Mercado Pago (SDK)
     │           saga_status = AWAITING_PAYMENT
     ▼
 AWAITING_PAYMENT
-    │ webhook MP (payment aprovado)
-    ▼
-PAID
-    │ advance (sem saga)
+    │ webhook MP (approved)     │ webhook MP (rejected)
+    ▼                           ▼
+PAID                    PAYMENT_REJECTED ──┬── retry-payment ──▶ AWAITING_PAYMENT
+    │ advance (sem saga)                   └── cancel ──────────▶ CANCELED
     ▼
 DELIVERED (FINAL)
 
@@ -176,7 +179,9 @@ DELIVERED (FINAL)
 CANCELED (FINAL) — acessível de qualquer estado não-final
   De RECEIVED, DIAGNOSING, AUTHORIZED, PENDING_AUTHORIZATION,
     IN_PROGRESS               → SAGA: publica CANCEL_RESERVED
-  De COMPLETED, AWAITING_PAYMENT, PAID  → SAGA: publica CANCEL_CONFIRMED
+  De COMPLETED, AWAITING_PAYMENT, PAYMENT_REJECTED
+                              → MP CancelOrder + SAGA: CANCEL_CONFIRMED
+  De PAID                    → MP RefundOrder + SAGA: CANCEL_CONFIRMED
 ```
 
 ### Operações de estoque por transição
@@ -189,7 +194,8 @@ Definidas em `internal/modules/service_order/domain/service_order/inventory_oper
 | IN_PROGRESS | COMPLETED | `RESERVED_DECREASE` | Forward step |
 | PENDING_AUTHORIZATION | AUTHORIZATION_DENIED | `CANCEL_RESERVED` | Compensação |
 | RECEIVED / DIAGNOSING / AUTHORIZED / PENDING_AUTHORIZATION / IN_PROGRESS | CANCELED | `CANCEL_RESERVED` | Compensação |
-| COMPLETED / AWAITING_PAYMENT / PAID | CANCELED | `CANCEL_CONFIRMED` | Compensação |
+| COMPLETED / AWAITING_PAYMENT / PAYMENT_REJECTED | CANCELED | MP CancelOrder + `CANCEL_CONFIRMED` | Compensação |
+| PAID | CANCELED | MP RefundOrder + `CANCEL_CONFIRMED` | Compensação + Estorno |
 
 ---
 
@@ -207,8 +213,10 @@ Definidas em `internal/modules/service_order/domain/service_order/inventory_oper
 | `POST` | `/service-orders/{id}/advance` | USER, MANAGER, ADMIN | Avançar status da OS |
 | `POST` | `/service-orders/{id}/authorize` | CUSTOMER, USER, MANAGER, ADMIN | Aprovar ou rejeitar OS |
 | `DELETE` | `/service-orders/{id}` | MANAGER, ADMIN | Cancelar OS (soft delete + compensação) |
-| `GET` | `/service-orders/{id}/payment` | USER, MANAGER, ADMIN | Retorna `payment_url` e `mp_preference_id` |
-| `POST` | `/payments/mp-webhook` | Público (validado por assinatura) | Recebe notificações do Mercado Pago |
+| `GET` | `/service-orders/{id}/payment` | USER, MANAGER, ADMIN | Retorna `payment_url`, `mp_order_id` e `status` de pagamento |
+| `POST` | `/service-orders/{id}/retry-payment` | USER, MANAGER, ADMIN | Cria novo Order MP para OS em `PAYMENT_REJECTED`; volta para `AWAITING_PAYMENT` |
+| `POST` | `/payments/mp-webhook` | Público (validado por HMAC-SHA256) | Recebe notificações da Orders API do Mercado Pago (`data.id = order_id`) |
+| `GET` | `/payments/result` | Público | Página HTML de retorno pós-pagamento (`?status=success\|pending\|failure&order={id}`) |
 | `GET` | `/health` | Público | Health check |
 
 ---
@@ -236,17 +244,36 @@ O Saga é orquestrado pelo `Orchestrator` em `internal/modules/service_order/app
 
 ## Integração Mercado Pago
 
-O fluxo de pagamento é iniciado pela transição `IN_PROGRESS → COMPLETED`:
+Usa o SDK Go oficial `github.com/mercadopago/sdk-go@v1.8.1` contra a **Orders API** (`/v1/orders`).
+
+### Fluxo de pagamento (COMPLETED → PAID)
 
 1. `AdvanceServiceOrderStatus` avança a OS para `COMPLETED`
 2. O saga step `RESERVED_DECREASE` é confirmado pelo MS3
-3. O usecase `CreatePaymentPreference` cria uma preferência no Mercado Pago via `POST /checkout/preferences`
-4. `mp_preference_id` e `payment_url` são persistidos na tabela `service_orders`
-5. O status avança automaticamente para `AWAITING_PAYMENT`
-6. O cliente acessa o link de pagamento via `GET /service-orders/{id}/payment`
-7. Após o pagamento, o Mercado Pago envia `POST /payments/mp-webhook`
-8. O `WebhookHandler` valida a assinatura `x-signature` com `MP_WEBHOOK_SECRET`
-9. `HandlePaymentWebhook` consulta o pagamento no MP via `GET /v1/payments/{id}`, persiste `mp_payment_id` e avança a OS para `PAID`
+3. O usecase `CreatePaymentOrder` cria um Order no Mercado Pago via SDK; usa snapshot de customer (email/nome) já persistido na OS — nenhuma chamada adicional ao MS1
+4. `mp_order_id` e `payment_url` são persistidos; OS avança para `AWAITING_PAYMENT`
+5. O cliente acessa o link via `GET /service-orders/{id}/payment`
+6. Após o pagamento, o Mercado Pago envia `POST /payments/mp-webhook` com `{"data": {"id": "<order_id>"}}`
+7. O `WebhookHandler` valida o HMAC-SHA256 via `x-signature` + `MP_WEBHOOK_SECRET` (manifest: `id:{order_id};request-id:{req-id};ts:{ts};`)
+8. `HandlePaymentWebhook` chama `sdk.GetOrder(order_id)` e inspeciona `transactions.payments[0].status`:
+   - **`approved`** → OS → `PAID`, persiste `mp_payment_id`, envia email de confirmação
+   - **`rejected`** → OS → `PAYMENT_REJECTED`, persiste `payment_rejection_reason`, envia email com URL de retry
+   - **`pending` / `in_process`** → OS permanece em `AWAITING_PAYMENT`
+
+### Retry após rejeição
+
+- `POST /service-orders/{id}/retry-payment` cancela o order anterior no MP e cria um novo
+- OS retorna para `AWAITING_PAYMENT` com novo `mp_order_id`
+- Aplicável somente quando OS está em `PAYMENT_REJECTED`
+
+### Cancelamento e estorno
+
+- Cancel em `AWAITING_PAYMENT` ou `PAYMENT_REJECTED`: `CancelPaymentOrder` chama `POST /v1/orders/{id}/cancel` antes de CANCELED
+- Cancel em `PAID`: `RefundPaymentOrder` chama `POST /v1/orders/{id}/refund` (estorno total); falha bloqueia a transição
+
+### Override de base URL (BDD/testes)
+
+O SDK tem `urlBase` hardcoded. Para apontar para o mock local, injeta-se um `RewritingRequester` via `config.WithHTTPClient` quando `MP_BASE_URL` está definido.
 
 ---
 
@@ -336,13 +363,30 @@ service_order_items (
 )
 ```
 
-**`migrations/002_payment_fields.sql`** — campos de pagamento:
+**`migrations/002_payment_fields.sql`** — campos originais de pagamento:
 
 ```sql
--- Adicionados à tabela service_orders:
-mp_preference_id  VARCHAR(255) NULL,
+-- Adicionados à tabela service_orders (agora renomeados pela 003):
+mp_preference_id  VARCHAR(255) NULL,   -- renomeado para mp_order_id pela 003
 mp_payment_id     VARCHAR(255) NULL,
 payment_url       TEXT NULL
+```
+
+**`migrations/003_mp_orders_api_migration.sql`** — migração para Orders API:
+
+```sql
+-- Renomear campo principal
+ALTER TABLE service_orders RENAME COLUMN mp_preference_id TO mp_order_id;
+
+-- Cache do status do order MP (evita GetOrder repetido)
+ALTER TABLE service_orders ADD COLUMN mp_order_status VARCHAR(50);
+
+-- Motivo de rejeição (status_detail do MP quando rejected)
+ALTER TABLE service_orders ADD COLUMN payment_rejection_reason VARCHAR(255);
+
+-- Snapshot do customer para o Payer do MP (evita REST sync com MS1 a cada pagamento)
+ALTER TABLE service_orders ADD COLUMN customer_email VARCHAR(255);
+ALTER TABLE service_orders ADD COLUMN customer_name  VARCHAR(255);
 ```
 
 ### DynamoDB — tabela `order_history`
@@ -412,10 +456,12 @@ ORDER_INVENTORY_OP_SUCCEEDED_QUEUE_URL=http://localhost:4566/000000000000/order-
 ORDER_INVENTORY_OP_FAILED_QUEUE_URL=http://localhost:4566/000000000000/order-inventory-op-failed
 CUSTOMER_DELETED_QUEUE_URL=http://localhost:4566/000000000000/customer-deleted
 
-# Mercado Pago
+# Mercado Pago (Orders API — SDK Go v1.8.1)
 MP_ACCESS_TOKEN=APP_USR-...
 MP_WEBHOOK_SECRET=seu-webhook-secret
 MP_NOTIFICATION_URL=https://api.oficina-tech.com/payments/mp-webhook
+MP_CALLBACK_BASE_URL=https://api.oficina-tech.com  # base para SuccessURL/PendingURL/FailureURL
+# MP_BASE_URL=http://localhost:9999               # override para mock BDD (não definir em produção)
 
 # SMTP (notificações por email)
 SMTP_HOST=smtp.example.com
@@ -440,7 +486,7 @@ Testes de comportamento em `features/` (Gherkin). Runner e step definitions em `
 |---------|------------------|
 | `service_order_lifecycle.feature` | Ciclo completo `RECEIVED → DELIVERED` |
 | `saga_compensation.feature` | Estoque insuficiente, autorização negada, cancelamento |
-| `payment_flow.feature` | `COMPLETED → AWAITING_PAYMENT → PAID` via webhook MP |
+| `payment_flow.feature` | Pagamento aprovado, rejeitado (`PAYMENT_REJECTED`), assinatura inválida, retry, cancel em `AWAITING_PAYMENT`, refund em `PAID` |
 | `customer_deleted.feature` | Cancelamento automático de OS ao deletar cliente |
 | `saga_recovery.feature` | Recuperação de saga interrompida após reinício do serviço |
 
