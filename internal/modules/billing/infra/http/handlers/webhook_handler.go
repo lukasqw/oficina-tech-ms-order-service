@@ -25,6 +25,9 @@ func NewWebhookHandler(validator *mercado_pago.SignatureValidator, useCase *usec
 
 type mercadoPagoWebhookPayload struct {
 	Type              string `json:"type"`
+	Action            string `json:"action"`
+	APIVersion        string `json:"api_version"`
+	LiveMode          bool   `json:"live_mode"`
 	ExternalReference string `json:"external_reference"`
 	Data              struct {
 		ID any `json:"id"`
@@ -44,11 +47,14 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ignora tipos de webhook que não são pagamentos (ex.: topic_merchant_order_wh).
+	// Ignora tipos de webhook que não são pagamentos (ex.: topic_merchant_order_wh, order).
 	// Retorna 200 para evitar retentativas desnecessárias do MP.
 	if payload.Type != "" && payload.Type != "payment" {
 		log.Info("mp_webhook: tipo ignorado",
 			slog.String("webhook_type", payload.Type),
+			slog.String("action", payload.Action),
+			slog.String("query_raw", r.URL.RawQuery),
+			slog.Bool("live_mode", payload.LiveMode),
 		)
 		w.WriteHeader(http.StatusOK)
 		return
@@ -61,6 +67,8 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	if paymentID == "" {
 		log.Warn("mp_webhook: payment_id ausente no payload",
 			slog.String("webhook_type", payload.Type),
+			slog.String("action", payload.Action),
+			slog.String("query_raw", r.URL.RawQuery),
 		)
 		utils.RespondErrorEnvelope(w, http.StatusBadRequest, utils.ErrCodeInvalidRequest, payment.ErrMalformedWebhook.Error())
 		return
@@ -69,18 +77,26 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	xSig := r.Header.Get("x-signature")
 	xReqID := r.Header.Get("x-request-id")
 
+	rawBody, _ := json.Marshal(payload)
 	log.Info("mp_webhook: recebido",
 		slog.String("payment_id", paymentID),
 		slog.String("webhook_type", payload.Type),
+		slog.String("action", payload.Action),
+		slog.String("api_version", payload.APIVersion),
+		slog.Bool("live_mode", payload.LiveMode),
+		slog.String("query_raw", r.URL.RawQuery),
 		slog.String("x_request_id", xReqID),
 		slog.Bool("has_x_signature", xSig != ""),
+		slog.String("x_signature_raw", xSig),
 		slog.String("sig_ts", sigTS(xSig)),
 		slog.String("remote_addr", r.RemoteAddr),
+		slog.String("payload_json", string(rawBody)),
 	)
 
 	if err := h.validator.Validate(xSig, xReqID, paymentID); err != nil {
 		log.Warn("mp_webhook: assinatura inválida",
 			slog.String("payment_id", paymentID),
+			slog.String("action", payload.Action),
 			slog.String("x_request_id", xReqID),
 			slog.Bool("has_x_signature", xSig != ""),
 			slog.String("sig_ts", sigTS(xSig)),
