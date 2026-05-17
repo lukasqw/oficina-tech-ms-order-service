@@ -186,6 +186,7 @@ runs:
           SERVER_PORT: "${{ inputs.server_port }}"
           APP_ENV: "production"
           APP_VERSION: "${{ inputs.version }}"
+          OTEL_SERVICE_NAME: "ms-order-service"
           AWS_REGION: "${{ inputs.aws_region }}"
           DYNAMODB_TABLE_ORDER_HISTORY: "${{ inputs.dynamodb_table }}"
           ORDER_INVENTORY_OP_REQUESTED_QUEUE_URL: "${{ inputs.sqs_inventory_op_requested_url }}"
