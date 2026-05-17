@@ -50,18 +50,11 @@ func BuildOrderItems(order *service_order.ServiceOrder) []payment.OrderItem {
 	return items
 }
 
-// buildPayerInfo constrói o PayerInfo a partir do snapshot do customer na OS.
-// Os métodos CustomerEmail/CPF/Name serão adicionados ao domínio na fase 5.
+// buildPayerInfo constrói o PayerInfo a partir do snapshot do customer persistido na OS.
+// CPF não está disponível no CustomerDTO atual — omitido (opcional no Checkout Pro com redirect).
 func buildPayerInfo(order *service_order.ServiceOrder) payment.PayerInfo {
-	payer := payment.PayerInfo{}
-	if m, ok := any(order).(interface {
-		CustomerEmail() string
-		CustomerCPF() string
-		CustomerName() string
-	}); ok {
-		payer.Email = m.CustomerEmail()
-		payer.CPF = m.CustomerCPF()
-		payer.Name = m.CustomerName()
+	return payment.PayerInfo{
+		Email: order.CustomerEmail(),
+		Name:  order.CustomerName(),
 	}
-	return payer
 }

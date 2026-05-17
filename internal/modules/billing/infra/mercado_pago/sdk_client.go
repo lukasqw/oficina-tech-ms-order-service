@@ -76,13 +76,7 @@ func (c *SDKClient) CreateOrder(ctx context.Context, items []payment.OrderItem, 
 		ExternalReference: externalRef,
 		Currency:          "BRL",
 		Items:             sdkItems,
-		Payer: &sdkorder.PayerRequest{
-			Email: payer.Email,
-			Identification: &sdkorder.IdentificationRequest{
-				Type:   taxIDType(payer.CPF),
-				Number: digitsOnly(payer.CPF),
-			},
-		},
+		Payer: buildSDKPayer(payer),
 		Config: &sdkorder.ConfigRequest{
 			Online: &sdkorder.OnlineConfigRequest{
 				CallbackURL: c.notificationURL,
@@ -175,6 +169,23 @@ func totalAmount(items []payment.OrderItem) string {
 	return fmt.Sprintf("%.2f", total)
 }
 
+// buildSDKPayer constrói o PayerRequest. Identification é omitida se CPF/CNPJ estiver vazio,
+// já que é opcional para Checkout Pro com redirect.
+func buildSDKPayer(payer payment.PayerInfo) *sdkorder.PayerRequest {
+	p := &sdkorder.PayerRequest{
+		Email:     payer.Email,
+		FirstName: firstWord(payer.Name),
+		LastName:  restWords(payer.Name),
+	}
+	if cpf := digitsOnly(payer.CPF); cpf != "" {
+		p.Identification = &sdkorder.IdentificationRequest{
+			Type:   taxIDType(payer.CPF),
+			Number: cpf,
+		}
+	}
+	return p
+}
+
 // taxIDType retorna "CNPJ" se o tax ID tiver 14 dígitos, "CPF" caso contrário.
 func taxIDType(taxID string) string {
 	if len(digitsOnly(taxID)) == 14 {
@@ -190,4 +201,22 @@ func digitsOnly(s string) string {
 		}
 		return -1
 	}, s)
+}
+
+func firstWord(s string) string {
+	for i, r := range s {
+		if r == ' ' {
+			return s[:i]
+		}
+	}
+	return s
+}
+
+func restWords(s string) string {
+	for i, r := range s {
+		if r == ' ' {
+			return strings.TrimSpace(s[i:])
+		}
+	}
+	return ""
 }

@@ -9,23 +9,27 @@ import (
 )
 
 type ServiceOrderModel struct {
-	ID               uuid.UUID               `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
-	CustomerID       uuid.UUID               `gorm:"type:uuid;not null;index"`
-	VehicleID        uuid.UUID               `gorm:"type:uuid;not null;index"`
-	Description      string                  `gorm:"type:text"`
-	Status           string                  `gorm:"type:varchar(50);not null;index"`
-	SagaStatus       string                  `gorm:"type:varchar(50);not null;default:'IDLE';index"`
-	CurrentSagaID    *uuid.UUID              `gorm:"type:uuid;index"`
-	SagaTargetStatus *string                 `gorm:"type:varchar(50)"`
-	SagaNotes        *string                 `gorm:"type:text"`
-	MPPreferenceID   *string                 `gorm:"column:mp_preference_id;type:varchar(255)"`
-	MPPaymentID      *string                 `gorm:"column:mp_payment_id;type:varchar(255)"`
-	PaymentURL       *string                 `gorm:"column:payment_url;type:text"`
-	ClosedAt         *time.Time              `gorm:"type:timestamp"`
-	CreatedAt        time.Time               `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
-	UpdatedAt        time.Time               `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
-	DeletedAt        gorm.DeletedAt          `gorm:"index"`
-	Items            []ServiceOrderItemModel `gorm:"foreignKey:ServiceOrderID;constraint:OnDelete:CASCADE"`
+	ID                    uuid.UUID               `gorm:"type:uuid;primaryKey;default:gen_random_uuid()"`
+	CustomerID            uuid.UUID               `gorm:"type:uuid;not null;index"`
+	VehicleID             uuid.UUID               `gorm:"type:uuid;not null;index"`
+	Description           string                  `gorm:"type:text"`
+	Status                string                  `gorm:"type:varchar(50);not null;index"`
+	SagaStatus            string                  `gorm:"type:varchar(50);not null;default:'IDLE';index"`
+	CurrentSagaID         *uuid.UUID              `gorm:"type:uuid;index"`
+	SagaTargetStatus      *string                 `gorm:"type:varchar(50)"`
+	SagaNotes             *string                 `gorm:"type:text"`
+	MPOrderID             *string                 `gorm:"column:mp_order_id;type:varchar(255)"`   // migration 003: era mp_preference_id
+	MPPaymentID           *string                 `gorm:"column:mp_payment_id;type:varchar(255)"`
+	MPOrderStatus         *string                 `gorm:"column:mp_order_status;type:varchar(50)"`
+	PaymentURL            *string                 `gorm:"column:payment_url;type:text"`
+	PaymentRejectionReason *string                `gorm:"column:payment_rejection_reason;type:varchar(255)"`
+	CustomerEmail         *string                 `gorm:"column:customer_email;type:varchar(255)"` // snapshot
+	CustomerName          *string                 `gorm:"column:customer_name;type:varchar(255)"`  // snapshot
+	ClosedAt              *time.Time              `gorm:"type:timestamp"`
+	CreatedAt             time.Time               `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
+	UpdatedAt             time.Time               `gorm:"type:timestamp;not null;default:CURRENT_TIMESTAMP"`
+	DeletedAt             gorm.DeletedAt          `gorm:"index"`
+	Items                 []ServiceOrderItemModel `gorm:"foreignKey:ServiceOrderID;constraint:OnDelete:CASCADE"`
 }
 
 func (ServiceOrderModel) TableName() string {
@@ -48,10 +52,7 @@ func (m *ServiceOrderModel) ToDomain() (*service_order.ServiceOrder, error) {
 		return nil, err
 	}
 
-	// Items will be loaded separately when needed (via FindByIDWithItems)
-	items := []*service_order.ServiceOrderItem{}
-
-	return service_order.ReconstructServiceOrder(
+	order, err := service_order.ReconstructServiceOrder(
 		m.ID.String(),
 		m.CustomerID.String(),
 		m.VehicleID.String(),
@@ -61,15 +62,30 @@ func (m *ServiceOrderModel) ToDomain() (*service_order.ServiceOrder, error) {
 		currentSagaID,
 		sagaTargetStatus,
 		m.SagaNotes,
-		m.MPPreferenceID,
+		m.MPOrderID,
 		m.MPPaymentID,
 		m.PaymentURL,
-		items,
+		[]*service_order.ServiceOrderItem{},
 		m.ClosedAt,
 		m.CreatedAt,
 		m.UpdatedAt,
 		deletedAt,
 	)
+	if err != nil {
+		return nil, err
+	}
+	if m.CustomerEmail != nil || m.CustomerName != nil {
+		email := ""
+		name := ""
+		if m.CustomerEmail != nil {
+			email = *m.CustomerEmail
+		}
+		if m.CustomerName != nil {
+			name = *m.CustomerName
+		}
+		order.SetCustomerSnapshot(email, name)
+	}
+	return order, nil
 }
 
 func (m *ServiceOrderModel) ToDomainWithItems() (*service_order.ServiceOrder, error) {
@@ -88,7 +104,6 @@ func (m *ServiceOrderModel) ToDomainWithItems() (*service_order.ServiceOrder, er
 		return nil, err
 	}
 
-	// Convert items to domain
 	items := make([]*service_order.ServiceOrderItem, 0, len(m.Items))
 	for _, itemModel := range m.Items {
 		item, err := itemModel.ToDomain()
@@ -98,7 +113,7 @@ func (m *ServiceOrderModel) ToDomainWithItems() (*service_order.ServiceOrder, er
 		items = append(items, item)
 	}
 
-	return service_order.ReconstructServiceOrder(
+	order, err := service_order.ReconstructServiceOrder(
 		m.ID.String(),
 		m.CustomerID.String(),
 		m.VehicleID.String(),
@@ -108,7 +123,7 @@ func (m *ServiceOrderModel) ToDomainWithItems() (*service_order.ServiceOrder, er
 		currentSagaID,
 		sagaTargetStatus,
 		m.SagaNotes,
-		m.MPPreferenceID,
+		m.MPOrderID,
 		m.MPPaymentID,
 		m.PaymentURL,
 		items,
@@ -117,6 +132,21 @@ func (m *ServiceOrderModel) ToDomainWithItems() (*service_order.ServiceOrder, er
 		m.UpdatedAt,
 		deletedAt,
 	)
+	if err != nil {
+		return nil, err
+	}
+	if m.CustomerEmail != nil || m.CustomerName != nil {
+		email := ""
+		name := ""
+		if m.CustomerEmail != nil {
+			email = *m.CustomerEmail
+		}
+		if m.CustomerName != nil {
+			name = *m.CustomerName
+		}
+		order.SetCustomerSnapshot(email, name)
+	}
+	return order, nil
 }
 
 func FromDomain(order *service_order.ServiceOrder) (*ServiceOrderModel, error) {
@@ -150,12 +180,19 @@ func FromDomain(order *service_order.ServiceOrder) (*ServiceOrderModel, error) {
 		CurrentSagaID:    parseUUIDPtr(order.CurrentSagaID()),
 		SagaTargetStatus: orderStatusStringPtr(order.SagaTargetStatus()),
 		SagaNotes:        order.SagaNotes(),
-		MPPreferenceID:   order.MPPreferenceID(),
+		MPOrderID:        order.MPPreferenceID(), // MPPreferenceID() retorna o mp_order_id pós-migration 003
 		MPPaymentID:      order.MPPaymentID(),
 		PaymentURL:       order.PaymentURL(),
 		ClosedAt:         order.ClosedAt(),
 		CreatedAt:        order.CreatedAt(),
 		UpdatedAt:        order.UpdatedAt(),
+	}
+
+	if email := order.CustomerEmail(); email != "" {
+		model.CustomerEmail = &email
+	}
+	if name := order.CustomerName(); name != "" {
+		model.CustomerName = &name
 	}
 
 	if order.DeletedAt() != nil {
