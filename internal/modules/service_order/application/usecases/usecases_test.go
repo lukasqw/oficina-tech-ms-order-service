@@ -390,6 +390,7 @@ func TestCreateServiceOrder_Success_NoItems(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("expected non-nil output")
+		return
 	}
 	if out.CustomerID != "cust-1" {
 		t.Errorf("want CustomerID 'cust-1', got %s", out.CustomerID)
@@ -450,6 +451,7 @@ func TestUpdateServiceOrder_DescriptionOnly(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("expected non-nil output")
+		return
 	}
 	if out.Description != "Nova descrição" {
 		t.Errorf("want description updated, got %s", out.Description)
@@ -580,6 +582,7 @@ func TestRespondToAuthorization_Approved_NoSaga(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("expected non-nil output")
+		return
 	}
 	if out.Status != "AUTHORIZED" {
 		t.Errorf("want status AUTHORIZED, got %s", out.Status)

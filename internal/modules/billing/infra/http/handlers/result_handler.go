@@ -23,17 +23,17 @@ func (h *ResultHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	switch status {
 	case "success":
-		fmt.Fprintf(w, resultHTML, "Pagamento Aprovado", "#22c55e",
+		_, _ = fmt.Fprintf(w, resultHTML, "Pagamento Aprovado", "#22c55e",
 			"Seu pagamento foi aprovado com sucesso.",
 			"A ordem de serviço <strong>"+orderID+"</strong> está sendo processada.",
 			"Você receberá um e-mail de confirmação em breve.")
 	case "pending":
-		fmt.Fprintf(w, resultHTML, "Pagamento Pendente", "#f59e0b",
+		_, _ = fmt.Fprintf(w, resultHTML, "Pagamento Pendente", "#f59e0b",
 			"Seu pagamento está sendo processado.",
 			"A ordem de serviço <strong>"+orderID+"</strong> aguarda confirmação.",
 			"Você será notificado por e-mail quando o pagamento for confirmado.")
 	default:
-		fmt.Fprintf(w, resultHTML, "Pagamento não Concluído", "#ef4444",
+		_, _ = fmt.Fprintf(w, resultHTML, "Pagamento não Concluído", "#ef4444",
 			"Não foi possível processar o pagamento.",
 			"A ordem de serviço <strong>"+orderID+"</strong> continua disponível.",
 			"Você pode tentar novamente através do aplicativo.")
