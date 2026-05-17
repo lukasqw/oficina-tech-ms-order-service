@@ -390,6 +390,7 @@ func TestCreateServiceOrder_Success_NoItems(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("expected non-nil output")
+		return
 	}
 	if out.CustomerID != "cust-1" {
 		t.Errorf("want CustomerID 'cust-1', got %s", out.CustomerID)
@@ -450,6 +451,7 @@ func TestUpdateServiceOrder_DescriptionOnly(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("expected non-nil output")
+		return
 	}
 	if out.Description != "Nova descrição" {
 		t.Errorf("want description updated, got %s", out.Description)
@@ -580,6 +582,7 @@ func TestRespondToAuthorization_Approved_NoSaga(t *testing.T) {
 	}
 	if out == nil {
 		t.Fatal("expected non-nil output")
+		return
 	}
 	if out.Status != "AUTHORIZED" {
 		t.Errorf("want status AUTHORIZED, got %s", out.Status)
@@ -742,7 +745,7 @@ func TestAdvanceServiceOrderStatus_Success_WithEmail(t *testing.T) {
 
 func TestDeleteServiceOrder_NotFound(t *testing.T) {
 	repo := &mockRepo{}
-	uc := NewDeleteServiceOrder(repo, nil)
+	uc := NewDeleteServiceOrder(repo, nil, nil, nil)
 	if _, err := uc.Execute(context.Background(), DeleteServiceOrderInput{ID: "missing"}); err == nil {
 		t.Fatal("expected error when order not found")
 	}
@@ -752,7 +755,7 @@ func TestDeleteServiceOrder_AlreadyDeleted(t *testing.T) {
 	order := newOrderWithID("so-1", "cust-1", "veh-1")
 	order.MarkAsDeleted()
 	repo := &mockRepo{orders: []*service_order.ServiceOrder{order}}
-	uc := NewDeleteServiceOrder(repo, nil)
+	uc := NewDeleteServiceOrder(repo, nil, nil, nil)
 	if _, err := uc.Execute(context.Background(), DeleteServiceOrderInput{ID: "so-1"}); err == nil {
 		t.Fatal("expected error for already deleted order")
 	}
@@ -760,7 +763,7 @@ func TestDeleteServiceOrder_AlreadyDeleted(t *testing.T) {
 
 func TestDeleteServiceOrder_RepoError(t *testing.T) {
 	repo := &mockRepo{findErr: errors.New("db down")}
-	uc := NewDeleteServiceOrder(repo, nil)
+	uc := NewDeleteServiceOrder(repo, nil, nil, nil)
 	if _, err := uc.Execute(context.Background(), DeleteServiceOrderInput{ID: "so-1"}); err == nil {
 		t.Fatal("expected repo error to propagate")
 	}

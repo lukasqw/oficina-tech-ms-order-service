@@ -11,7 +11,7 @@ func TestNewModuleWiresUseCases(t *testing.T) {
 	module := NewModule(nil, nil, nil, nil, &moduleMPClient{})
 	if module.MercadoPagoClient == nil ||
 		module.SignatureValidator == nil ||
-		module.CreatePreference == nil ||
+		module.CreatePaymentOrder == nil ||
 		module.HandlePaymentWebhook == nil ||
 		module.GetPaymentStatus == nil {
 		t.Fatalf("module dependencies were not wired: %+v", module)
@@ -25,12 +25,21 @@ func TestNewModuleCreatesDefaultClientWhenNil(t *testing.T) {
 	}
 }
 
+// moduleMPClient é um stub mínimo que satisfaz a interface payment.MercadoPagoClient.
 type moduleMPClient struct{}
 
-func (c *moduleMPClient) CreatePreference(ctx context.Context, orderID string, items []payment.PreferenceItem, externalRef string) (*payment.Preference, error) {
+func (c *moduleMPClient) CreateOrder(_ context.Context, _ []payment.OrderItem, _ payment.PayerInfo, _ string) (*payment.Order, error) {
 	return nil, nil
 }
-
-func (c *moduleMPClient) GetPayment(ctx context.Context, paymentID string) (*payment.Payment, error) {
+func (c *moduleMPClient) GetOrder(_ context.Context, _ string) (*payment.Order, error) {
+	return nil, nil
+}
+func (c *moduleMPClient) CancelOrder(_ context.Context, _ string) (*payment.Order, error) {
+	return nil, nil
+}
+func (c *moduleMPClient) RefundOrder(_ context.Context, _ string, _ *string) (*payment.Order, error) {
+	return nil, nil
+}
+func (c *moduleMPClient) GetPayment(_ context.Context, _ string) (*payment.Payment, error) {
 	return nil, nil
 }

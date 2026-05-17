@@ -428,8 +428,8 @@ func TestRejectPayment_Valid(t *testing.T) {
 	if err := so.RejectPayment(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if so.Status() != StatusCompleted {
-		t.Errorf("want COMPLETED after RejectPayment, got %s", so.Status())
+	if so.Status() != StatusPaymentRejected {
+		t.Errorf("want PAYMENT_REJECTED after RejectPayment, got %s", so.Status())
 	}
 }
 

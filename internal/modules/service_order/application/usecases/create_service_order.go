@@ -81,8 +81,8 @@ func (uc *CreateServiceOrder) Execute(ctx context.Context, input CreateServiceOr
 		"item_count", len(input.Items),
 	)
 
-	// Validar existência do customer através do adapter
-	_, err := uc.customerAdapter.GetCustomerByID(ctx, input.CustomerID)
+	// Validar existência do customer e obter dados para o snapshot de pagamento
+	customerDTO, err := uc.customerAdapter.GetCustomerByID(ctx, input.CustomerID)
 	if err != nil {
 		logger.WarnContext(ctx, "customer not found for service order creation",
 			"customer_id", input.CustomerID,
@@ -194,6 +194,10 @@ func (uc *CreateServiceOrder) Execute(ctx context.Context, input CreateServiceOr
 		span.RecordError(err)
 		return nil, err
 	}
+
+	// Persiste snapshot do customer para uso na criação do Order no Mercado Pago.
+	// Evita chamada extra ao MS1 no momento do pagamento.
+	order.SetCustomerSnapshot(customerDTO.Email, customerDTO.Name)
 
 	// Adicionar todos os itens à ordem (sem serviceOrderID ainda)
 	for _, item := range itemsToAdd {

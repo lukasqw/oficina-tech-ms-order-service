@@ -55,8 +55,11 @@ func TestOrderStatusPaymentTransitions(t *testing.T) {
 	if !StatusAwaitingPayment.CanTransitionTo(StatusPaid) {
 		t.Fatalf("AWAITING_PAYMENT should allow payment approval")
 	}
-	if !StatusAwaitingPayment.CanTransitionTo(StatusCompleted) {
-		t.Fatalf("AWAITING_PAYMENT should allow retry after rejected payment")
+	if !StatusAwaitingPayment.CanTransitionTo(StatusPaymentRejected) {
+		t.Fatalf("AWAITING_PAYMENT should allow transition to PAYMENT_REJECTED")
+	}
+	if !StatusPaymentRejected.CanTransitionTo(StatusAwaitingPayment) {
+		t.Fatalf("PAYMENT_REJECTED should allow retry (back to AWAITING_PAYMENT)")
 	}
 	if !StatusAwaitingPayment.CanTransitionTo(StatusCanceled) {
 		t.Fatalf("AWAITING_PAYMENT should allow cancel")
