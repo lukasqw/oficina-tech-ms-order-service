@@ -212,7 +212,7 @@ func registerServiceOrderRoutes(mux *http.ServeMux, dynamoClient *shareddynamo.C
 	getUseCase := serviceOrderUsecases.NewGetServiceOrder(orderRepo, productAdapter, serviceAdapter, customerAdapter, vehicleAdapter)
 	getAllUseCase := serviceOrderUsecases.NewGetAllServiceOrders(orderRepo, customerAdapter, vehicleAdapter)
 	updateUseCase := serviceOrderUsecases.NewUpdateServiceOrder(orderRepo, historyRepo, customerAdapter, vehicleAdapter, productAdapter, serviceAdapter)
-	deleteUseCase := serviceOrderUsecases.NewDeleteServiceOrder(orderRepo, sagaOrchestrator)
+	deleteUseCase := serviceOrderUsecases.NewDeleteServiceOrder(orderRepo, sagaOrchestrator, billing.CancelPaymentOrder, billing.RefundPaymentOrder)
 	advanceUseCase := serviceOrderUsecases.NewAdvanceServiceOrderStatus(orderRepo, historyRepo, sagaOrchestrator, billing.CreatePaymentOrder, customerAdapter, emailService)
 	authorizeUseCase := serviceOrderUsecases.NewRespondToAuthorization(orderRepo, historyRepo, sagaOrchestrator, customerAdapter, emailService)
 	historyUseCase := serviceOrderUsecases.NewGetServiceOrderHistory(historyRepo)

@@ -742,7 +742,7 @@ func TestAdvanceServiceOrderStatus_Success_WithEmail(t *testing.T) {
 
 func TestDeleteServiceOrder_NotFound(t *testing.T) {
 	repo := &mockRepo{}
-	uc := NewDeleteServiceOrder(repo, nil)
+	uc := NewDeleteServiceOrder(repo, nil, nil, nil)
 	if _, err := uc.Execute(context.Background(), DeleteServiceOrderInput{ID: "missing"}); err == nil {
 		t.Fatal("expected error when order not found")
 	}
@@ -752,7 +752,7 @@ func TestDeleteServiceOrder_AlreadyDeleted(t *testing.T) {
 	order := newOrderWithID("so-1", "cust-1", "veh-1")
 	order.MarkAsDeleted()
 	repo := &mockRepo{orders: []*service_order.ServiceOrder{order}}
-	uc := NewDeleteServiceOrder(repo, nil)
+	uc := NewDeleteServiceOrder(repo, nil, nil, nil)
 	if _, err := uc.Execute(context.Background(), DeleteServiceOrderInput{ID: "so-1"}); err == nil {
 		t.Fatal("expected error for already deleted order")
 	}
@@ -760,7 +760,7 @@ func TestDeleteServiceOrder_AlreadyDeleted(t *testing.T) {
 
 func TestDeleteServiceOrder_RepoError(t *testing.T) {
 	repo := &mockRepo{findErr: errors.New("db down")}
-	uc := NewDeleteServiceOrder(repo, nil)
+	uc := NewDeleteServiceOrder(repo, nil, nil, nil)
 	if _, err := uc.Execute(context.Background(), DeleteServiceOrderInput{ID: "so-1"}); err == nil {
 		t.Fatal("expected repo error to propagate")
 	}
