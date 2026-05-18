@@ -60,6 +60,19 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Formato legado "MercadoPago Feed v2.0": envia ?id=X&topic=merchant_order em vez de
+	// ?data.id=X com type no body. Retorna 200 para suprimir retentativas.
+	if topic := r.URL.Query().Get("topic"); topic != "" {
+		log.Info("mp_webhook: formato legado ignorado",
+			slog.String("topic", topic),
+			slog.String("legacy_id", r.URL.Query().Get("id")),
+			slog.String("query_raw", r.URL.RawQuery),
+			slog.String("user_agent", r.Header.Get("User-Agent")),
+		)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
 	paymentID := r.URL.Query().Get("data.id")
 	if paymentID == "" {
 		paymentID = stringifyID(payload.Data.ID)
