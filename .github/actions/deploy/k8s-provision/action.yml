@@ -83,6 +83,10 @@ inputs:
     description: 'Base public URL of MS2 for MP redirect callbacks (success/pending/failure)'
     required: false
     default: ''
+  mp_sandbox:
+    description: 'true = sandbox mode (sandbox_init_point + test email). Needed when MP credentials are APP_USR- test tokens.'
+    required: false
+    default: 'true'
   # SMTP
   smtp_host:
     description: 'SMTP host for email notifications'
@@ -201,6 +205,7 @@ runs:
           MS3_BASE_URL: "${MS3_URL}"
           MP_NOTIFICATION_URL: "${{ inputs.mp_notification_url }}"
           MP_CALLBACK_BASE_URL: "${{ inputs.mp_callback_base_url }}"
+          MP_SANDBOX: "${{ inputs.mp_sandbox }}"
           SMTP_HOST: "${{ inputs.smtp_host }}"
           SMTP_PORT: "${{ inputs.smtp_port }}"
           SMTP_USERNAME: "${{ inputs.smtp_username }}"
