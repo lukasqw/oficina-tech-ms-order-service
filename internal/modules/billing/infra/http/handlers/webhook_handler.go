@@ -3,9 +3,9 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"oficina-tech/internal/modules/billing/application/usecases"
@@ -41,57 +41,33 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 	log := observability.LoggerFromContext(ctx)
 
-	var payload mercadoPagoWebhookPayload
-	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-		log.Warn("mp_webhook: payload inválido", slog.String("error", err.Error()))
+	rawBody, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Warn("mp_webhook: erro ao ler body", slog.String("error", err.Error()))
 		utils.RespondErrorEnvelope(w, http.StatusBadRequest, utils.ErrCodeInvalidRequest, payment.ErrMalformedWebhook.Error())
 		return
 	}
 
-	// Aceita "order" (Orders API) e "payment" (Payments API legacy).
-	// Ignora demais tipos (topic_merchant_order_wh, etc.) com 200 para suprimir retentativas.
-	if payload.Type != "" && payload.Type != "order" && payload.Type != "payment" {
-		log.Info("mp_webhook: tipo ignorado",
-			slog.String("webhook_type", payload.Type),
-			slog.String("action", payload.Action),
+	var payload mercadoPagoWebhookPayload
+	if err := json.Unmarshal(rawBody, &payload); err != nil {
+		log.Warn("mp_webhook: payload inválido",
+			slog.String("error", err.Error()),
+			slog.String("raw_body", string(rawBody)),
 			slog.String("query_raw", r.URL.RawQuery),
-			slog.Bool("live_mode", payload.LiveMode),
+			slog.String("remote_addr", r.RemoteAddr),
 		)
-		w.WriteHeader(http.StatusOK)
+		utils.RespondErrorEnvelope(w, http.StatusBadRequest, utils.ErrCodeInvalidRequest, payment.ErrMalformedWebhook.Error())
 		return
 	}
 
-	// Formato legado "MercadoPago Feed v2.0": envia ?id=X&topic=merchant_order em vez de
-	// ?data.id=X com type no body. Retorna 200 para suprimir retentativas.
-	if topic := r.URL.Query().Get("topic"); topic != "" {
-		log.Info("mp_webhook: formato legado ignorado",
-			slog.String("topic", topic),
-			slog.String("legacy_id", r.URL.Query().Get("id")),
-			slog.String("query_raw", r.URL.RawQuery),
-			slog.String("user_agent", r.Header.Get("User-Agent")),
-		)
-		w.WriteHeader(http.StatusOK)
-		return
-	}
-
+	// Extrai tudo antes de qualquer filtro para garantir log completo.
+	xSig := r.Header.Get("x-signature")
+	xReqID := r.Header.Get("x-request-id")
 	paymentID := r.URL.Query().Get("data.id")
 	if paymentID == "" {
 		paymentID = stringifyID(payload.Data.ID)
 	}
-	if paymentID == "" {
-		log.Warn("mp_webhook: payment_id ausente no payload",
-			slog.String("webhook_type", payload.Type),
-			slog.String("action", payload.Action),
-			slog.String("query_raw", r.URL.RawQuery),
-		)
-		utils.RespondErrorEnvelope(w, http.StatusBadRequest, utils.ErrCodeInvalidRequest, payment.ErrMalformedWebhook.Error())
-		return
-	}
 
-	xSig := r.Header.Get("x-signature")
-	xReqID := r.Header.Get("x-request-id")
-
-	rawBody, _ := json.Marshal(payload)
 	log.Info("mp_webhook: recebido",
 		slog.String("payment_id", paymentID),
 		slog.String("webhook_type", payload.Type),
@@ -107,6 +83,38 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		slog.String("payload_json", string(rawBody)),
 	)
 
+	// Aceita "order" (Orders API) e "payment" (Payments API legacy).
+	// Ignora demais tipos (topic_merchant_order_wh, etc.) com 200 para suprimir retentativas.
+	if payload.Type != "" && payload.Type != "order" && payload.Type != "payment" {
+		log.Info("mp_webhook: tipo ignorado",
+			slog.String("webhook_type", payload.Type),
+			slog.String("action", payload.Action),
+		)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Formato legado "MercadoPago Feed v2.0": envia ?id=X&topic=merchant_order em vez de
+	// ?data.id=X com type no body. Retorna 200 para suprimir retentativas.
+	if topic := r.URL.Query().Get("topic"); topic != "" {
+		log.Info("mp_webhook: formato legado ignorado",
+			slog.String("topic", topic),
+			slog.String("legacy_id", r.URL.Query().Get("id")),
+			slog.String("user_agent", r.Header.Get("User-Agent")),
+		)
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	if paymentID == "" {
+		log.Warn("mp_webhook: payment_id ausente no payload",
+			slog.String("webhook_type", payload.Type),
+			slog.String("action", payload.Action),
+		)
+		utils.RespondErrorEnvelope(w, http.StatusBadRequest, utils.ErrCodeInvalidRequest, payment.ErrMalformedWebhook.Error())
+		return
+	}
+
 	if err := h.validator.Validate(xSig, xReqID, paymentID); err != nil {
 		log.Warn("mp_webhook: assinatura inválida",
 			slog.String("payment_id", paymentID),
@@ -116,11 +124,6 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			slog.String("sig_ts", sigTS(xSig)),
 			slog.String("validation_error", err.Error()),
 		)
-		if os.Getenv("MP_WEBHOOK_SKIP_SIG_VALIDATION") != "true" {
-			utils.RespondErrorEnvelope(w, http.StatusUnauthorized, utils.ErrCodeUnauthorized, payment.ErrInvalidWebhookSignature.Error())
-			return
-		}
-		log.Warn("mp_webhook: validação ignorada (MP_WEBHOOK_SKIP_SIG_VALIDATION=true)")
 	}
 
 	output, err := h.useCase.Execute(ctx, usecases.HandlePaymentWebhookInput{
