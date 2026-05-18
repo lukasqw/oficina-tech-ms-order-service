@@ -54,7 +54,7 @@ func TestWebhookHandlerPaymentStatuses(t *testing.T) {
 	}
 }
 
-func TestWebhookHandlerRejectsInvalidSignature(t *testing.T) {
+func TestWebhookHandlerLogsInvalidSignatureButContinues(t *testing.T) {
 	handler := newTestWebhookHandler(newHandlerOrderRepo(handlerAwaitingPaymentOrder(t)), &handlerMPClient{
 		order: &payment.Order{ID: "order-1", PaymentID: "pay-1", PaymentStatus: "approved", ExternalReference: handlerOrderID},
 	})
@@ -66,8 +66,10 @@ func TestWebhookHandlerRejectsInvalidSignature(t *testing.T) {
 
 	handler.Handle(rr, req)
 
-	if rr.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401, got %d", rr.Code)
+	// Validação desabilitada temporariamente para captura de logs de produção.
+	// Assinatura inválida apenas loga warning e continua processando.
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
 	}
 }
 
