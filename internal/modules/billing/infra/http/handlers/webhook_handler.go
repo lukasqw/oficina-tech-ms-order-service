@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"oficina-tech/internal/modules/billing/application/usecases"
@@ -115,8 +116,11 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 			slog.String("sig_ts", sigTS(xSig)),
 			slog.String("validation_error", err.Error()),
 		)
-		utils.RespondErrorEnvelope(w, http.StatusUnauthorized, utils.ErrCodeUnauthorized, payment.ErrInvalidWebhookSignature.Error())
-		return
+		if os.Getenv("MP_WEBHOOK_SKIP_SIG_VALIDATION") != "true" {
+			utils.RespondErrorEnvelope(w, http.StatusUnauthorized, utils.ErrCodeUnauthorized, payment.ErrInvalidWebhookSignature.Error())
+			return
+		}
+		log.Warn("mp_webhook: validação ignorada (MP_WEBHOOK_SKIP_SIG_VALIDATION=true)")
 	}
 
 	output, err := h.useCase.Execute(ctx, usecases.HandlePaymentWebhookInput{
