@@ -67,6 +67,11 @@ func NewSDKClientFromEnv() (*SDKClient, error) {
 	if baseURL != "" {
 		client.apiBaseURL = strings.TrimRight(baseURL, "/")
 	}
+	// MP_SANDBOX=true força modo sandbox independente do prefixo do token.
+	// Necessário pois credenciais de teste no MP atual usam prefixo APP_USR-, não TEST-.
+	if os.Getenv("MP_SANDBOX") == "true" {
+		client.isSandbox = true
+	}
 	return client, nil
 }
 

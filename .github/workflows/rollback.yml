@@ -127,6 +127,7 @@ jobs:
           ms1_app_name: ${{ vars.MS1_APP_NAME || 'ms-identity' }}
           ms3_app_name: ${{ vars.MS3_APP_NAME || 'ms-workshop' }}
           mp_notification_url: ${{ vars.MP_NOTIFICATION_URL }}
+          mp_sandbox: ${{ vars.MP_SANDBOX || 'true' }}
           db_password: ${{ secrets.DB_PASSWORD }}
           jwt_secret_key: ${{ secrets.JWT_SECRET_KEY }}
           smtp_host: ${{ vars.SMTP_HOST }}
