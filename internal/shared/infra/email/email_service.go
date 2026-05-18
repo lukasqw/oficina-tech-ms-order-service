@@ -105,6 +105,13 @@ func (s *SMTPEmailService) sendEmail(to, subject, body string) error {
 	return nil
 }
 
+// NoOpEmailService descarta todos os envios silenciosamente.
+type NoOpEmailService struct{}
+
+func NewNoOpEmailService() *NoOpEmailService { return &NoOpEmailService{} }
+
+func (n *NoOpEmailService) SendStatusUpdateEmail(_, _, _, _, _ string) error { return nil }
+
 // getEnv obtém variável de ambiente com valor padrão
 func getEnv(key, defaultValue string) string {
 	value := os.Getenv(key)
