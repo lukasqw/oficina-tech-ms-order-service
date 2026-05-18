@@ -47,9 +47,9 @@ func (h *WebhookHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Ignora tipos de webhook que não são pagamentos (ex.: topic_merchant_order_wh, order).
-	// Retorna 200 para evitar retentativas desnecessárias do MP.
-	if payload.Type != "" && payload.Type != "payment" {
+	// Aceita "order" (Orders API) e "payment" (Payments API legacy).
+	// Ignora demais tipos (topic_merchant_order_wh, etc.) com 200 para suprimir retentativas.
+	if payload.Type != "" && payload.Type != "order" && payload.Type != "payment" {
 		log.Info("mp_webhook: tipo ignorado",
 			slog.String("webhook_type", payload.Type),
 			slog.String("action", payload.Action),

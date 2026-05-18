@@ -27,7 +27,9 @@ func (v *SignatureValidator) Validate(xSignature, xRequestID, paymentID string) 
 		return payment.ErrInvalidWebhookSignature
 	}
 
-	manifest := "id:" + paymentID + ";request-id:" + xRequestID + ";ts:" + ts + ";"
+	// A documentação do MP especifica que o data.id deve estar em minúsculas no manifesto
+	// (IDs de order chegam em maiúsculas: ORD01..., mas o HMAC é calculado com lowercase).
+	manifest := "id:" + strings.ToLower(paymentID) + ";request-id:" + xRequestID + ";ts:" + ts + ";"
 	mac := hmac.New(sha256.New, []byte(v.secret))
 	_, _ = mac.Write([]byte(manifest))
 	expected := hex.EncodeToString(mac.Sum(nil))

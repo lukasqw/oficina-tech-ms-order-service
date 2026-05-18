@@ -203,7 +203,7 @@ func registerServiceOrderRoutes(mux *http.ServeMux, dynamoClient *shareddynamo.C
 	vehicleAdapter := serviceOrderAdapters.NewVehicleAdapter(ms1Client)
 	productAdapter := serviceOrderAdapters.NewProductAdapter(ms3Client)
 	serviceAdapter := serviceOrderAdapters.NewServiceAdapter(ms3Client)
-	emailService := email.NewSMTPEmailService()
+	emailService := email.NewNoOpEmailService()
 	inventoryPublisher := publishers.NewOrderInventoryOperationPublisher(sqsClient, queueURLs[queueOrderInventoryRequested])
 	sagaOrchestrator := appsaga.NewOrchestrator(orderRepo, historyRepo, inventoryPublisher, customerAdapter, emailService)
 	billing := billingModule.NewModule(orderRepo, historyRepo, customerAdapter, emailService, nil)
