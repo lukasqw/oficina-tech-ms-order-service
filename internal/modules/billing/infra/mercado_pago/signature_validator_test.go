@@ -38,6 +38,18 @@ func TestSignatureValidatorMalformedHeader(t *testing.T) {
 	}
 }
 
+func TestSignatureValidatorValidSignatureWithoutRequestID(t *testing.T) {
+	secret := "secret"
+	paymentID := "123456"
+	ts := "1742505638683"
+	signature := sign(secret, "id:"+paymentID+";ts:"+ts+";")
+
+	validator := NewSignatureValidator(secret)
+	if err := validator.Validate("ts="+ts+",v1="+signature, "", paymentID); err != nil {
+		t.Fatalf("Validate() without x-request-id error = %v", err)
+	}
+}
+
 func TestSignatureValidatorMissingSecret(t *testing.T) {
 	validator := NewSignatureValidator("")
 	err := validator.Validate("ts=1,v1=abc", "request-id", "123456")

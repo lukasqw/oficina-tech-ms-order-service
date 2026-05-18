@@ -23,13 +23,17 @@ func (v *SignatureValidator) Validate(xSignature, xRequestID, paymentID string) 
 		return payment.ErrMissingWebhookSecret
 	}
 	ts, signature, ok := parseSignatureHeader(xSignature)
-	if !ok || xRequestID == "" || paymentID == "" {
+	if !ok || paymentID == "" {
 		return payment.ErrInvalidWebhookSignature
 	}
 
-	// A documentação do MP especifica que o data.id deve estar em minúsculas no manifesto
-	// (IDs de order chegam em maiúsculas: ORD01..., mas o HMAC é calculado com lowercase).
-	manifest := "id:" + strings.ToLower(paymentID) + ";request-id:" + xRequestID + ";ts:" + ts + ";"
+	// MP docs: se algum campo estiver ausente na notificação, removê-lo do manifesto.
+	// data.id deve ser lowercase (IDs de order chegam em maiúsculas: ORD01...).
+	manifest := "id:" + strings.ToLower(paymentID) + ";"
+	if xRequestID != "" {
+		manifest += "request-id:" + xRequestID + ";"
+	}
+	manifest += "ts:" + ts + ";"
 	mac := hmac.New(sha256.New, []byte(v.secret))
 	_, _ = mac.Write([]byte(manifest))
 	expected := hex.EncodeToString(mac.Sum(nil))
