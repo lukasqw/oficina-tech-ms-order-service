@@ -254,6 +254,16 @@ func (s *ServiceOrder) RejectPayment() error {
 	return nil
 }
 
+// CancelAfterRefund transiciona a OS de PAID para CANCELED quando o estorno
+// foi realizado externamente (ex: painel do vendedor no Mercado Pago).
+// O webhook de "refunded" do MP dispara esta transição.
+func (s *ServiceOrder) CancelAfterRefund() error {
+	if s.status != StatusPaid {
+		return ErrInvalidStatusTransition
+	}
+	return s.UpdateStatus(StatusCanceled)
+}
+
 func (s *ServiceOrder) FailSaga() {
 	s.sagaStatus = SagaStatusFailed
 	s.currentSagaID = nil
