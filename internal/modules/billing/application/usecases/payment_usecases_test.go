@@ -223,7 +223,7 @@ func TestHandlePaymentWebhookErrorsWithoutExternalReference(t *testing.T) {
 
 func TestHandlePaymentWebhookUnknownStatusIsIgnored(t *testing.T) {
 	uc := NewHandlePaymentWebhook(
-		&fakeMPClient{order: &payment.Order{ID: "order-6", PaymentID: "pay-6", PaymentStatus: "refunded", ExternalReference: testOrderID}},
+		&fakeMPClient{order: &payment.Order{ID: "order-6", PaymentID: "pay-6", PaymentStatus: "chargeback", ExternalReference: testOrderID}},
 		newMemoryOrderRepo(awaitingPaymentOrder(t)),
 		&memoryHistoryRepo{},
 		&fakeCustomerAdapter{},
@@ -234,8 +234,62 @@ func TestHandlePaymentWebhookUnknownStatusIsIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute() error = %v", err)
 	}
-	if output.Processed || output.Status != "refunded" {
+	if output.Processed || output.Status != "chargeback" {
 		t.Fatalf("unexpected unknown status output: %+v", output)
+	}
+}
+
+func TestHandlePaymentWebhookRefundedTransitionsToCanceled(t *testing.T) {
+	repo := newMemoryOrderRepo(paidOrder(t))
+	historyRepo := &memoryHistoryRepo{}
+	emailService := email.NewMockEmailService()
+	uc := NewHandlePaymentWebhook(
+		&fakeMPClient{order: &payment.Order{ID: "order-7", PaymentID: "pay-7", PaymentStatus: "refunded", ExternalReference: testOrderID}},
+		repo,
+		historyRepo,
+		&fakeCustomerAdapter{},
+		emailService,
+	)
+
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-7"})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if !output.Processed || output.Status != service_order.StatusCanceled.String() {
+		t.Fatalf("unexpected output: %+v", output)
+	}
+	order := repo.orders[testOrderID]
+	if order.Status() != service_order.StatusCanceled {
+		t.Fatalf("order was not canceled: status=%s", order.Status())
+	}
+	if len(historyRepo.saved) != 1 {
+		t.Fatalf("expected history save")
+	}
+	if len(emailService.SentEmails) != 1 {
+		t.Fatalf("expected cancellation email")
+	}
+}
+
+func TestHandlePaymentWebhookRefundedIsIdempotentWhenAlreadyCanceled(t *testing.T) {
+	order := paidOrder(t)
+	if err := order.CancelAfterRefund(); err != nil {
+		t.Fatalf("CancelAfterRefund() error = %v", err)
+	}
+	historyRepo := &memoryHistoryRepo{}
+	uc := NewHandlePaymentWebhook(
+		&fakeMPClient{order: &payment.Order{ID: "order-7", PaymentID: "pay-7", PaymentStatus: "refunded", ExternalReference: testOrderID}},
+		newMemoryOrderRepo(order),
+		historyRepo,
+		&fakeCustomerAdapter{},
+		email.NewMockEmailService(),
+	)
+
+	output, err := uc.Execute(context.Background(), HandlePaymentWebhookInput{MPOrderID: "pay-7"})
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if output.Processed || len(historyRepo.saved) != 0 {
+		t.Fatalf("already canceled refund webhook should be idempotent: %+v", output)
 	}
 }
 
@@ -431,6 +485,15 @@ func (r *memoryHistoryRepo) FindByServiceOrderID(context.Context, string) ([]*se
 
 func (r *memoryHistoryRepo) FindByID(context.Context, string) (*service_order.History, error) {
 	return nil, errors.New("not implemented")
+}
+
+func paidOrder(t *testing.T) *service_order.ServiceOrder {
+	t.Helper()
+	order := awaitingPaymentOrder(t)
+	if err := order.ConfirmPayment("pay-confirmed"); err != nil {
+		t.Fatalf("ConfirmPayment() error = %v", err)
+	}
+	return order
 }
 
 func awaitingPaymentOrder(t *testing.T) *service_order.ServiceOrder {
