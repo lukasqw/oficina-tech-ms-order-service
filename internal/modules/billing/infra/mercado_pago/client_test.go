@@ -24,7 +24,7 @@ func newTestSDKClient(t *testing.T, server *httptest.Server) *SDKClient {
 	if err != nil {
 		t.Fatalf("NewSDKClient() error = %v", err)
 	}
-	// Direct HTTP calls (GetPayment, RefundOrder) usam apiBaseURL.
+	// GetPayment ainda usa HTTP direto via apiBaseURL.
 	client.apiBaseURL = server.URL
 	return client
 }
@@ -128,21 +128,35 @@ func TestSDKClientGetPayment(t *testing.T) {
 
 func TestSDKClientRefundOrder(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/v1/payments/pay-1/refunds" {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/payments/12345/refunds" {
 			http.NotFound(w, r)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "refund-1", "status": "approved"})
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": 1, "status": "approved"})
 	}))
 	defer server.Close()
 
 	client := newTestSDKClient(t, server)
-	order, err := client.RefundOrder(context.Background(), "pay-1", nil)
+	order, err := client.RefundOrder(context.Background(), "12345", nil)
 	if err != nil {
 		t.Fatalf("RefundOrder() error = %v", err)
 	}
 	if order.Status != "refunded" {
 		t.Errorf("expected status 'refunded', got %q", order.Status)
+	}
+}
+
+func TestSDKClientRefundOrderInvalidID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("unexpected HTTP call for non-numeric payment ID")
+	}))
+	defer server.Close()
+
+	client := newTestSDKClient(t, server)
+	_, err := client.RefundOrder(context.Background(), "pay-abc", nil)
+	if err == nil {
+		t.Fatal("expected error for non-numeric payment ID")
 	}
 }
 

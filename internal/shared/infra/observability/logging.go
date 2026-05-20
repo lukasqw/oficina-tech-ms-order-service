@@ -14,6 +14,11 @@ import (
 // NewLogger creates a JSON structured logger with Datadog-compatible field names
 // and sets it as the default. All logs will include service, env and version tags.
 func NewLogger() *slog.Logger {
+	serviceName := os.Getenv("OTEL_SERVICE_NAME")
+	if serviceName == "" {
+		serviceName = "ms-order-service"
+	}
+
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 		ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
@@ -31,7 +36,7 @@ func NewLogger() *slog.Logger {
 			return a
 		},
 	})).With(
-		slog.String("service", "oficina-tech"),
+		slog.String("service", serviceName),
 		slog.String("env", os.Getenv("APP_ENV")),
 		slog.String("version", os.Getenv("APP_VERSION")),
 	)
