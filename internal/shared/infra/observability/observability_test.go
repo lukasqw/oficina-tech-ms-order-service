@@ -2,13 +2,17 @@ package observability
 
 import (
 	"context"
+	"errors"
 	"os"
+	"strings"
 	"testing"
+	"time"
 
 	sqstypes "github.com/aws/aws-sdk-go-v2/service/sqs/types"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"gorm.io/gorm"
 )
 
 func TestMain(m *testing.M) {
@@ -174,4 +178,129 @@ func TestSpanUseCase_ReturnsContextAndSpan(t *testing.T) {
 	if ctx == nil {
 		t.Fatal("expected non-nil context from SpanUseCase")
 	}
+}
+
+// --- NewLogger branches ---
+
+func TestNewLogger_WithServiceNameEnvVar(t *testing.T) {
+	t.Setenv("OTEL_SERVICE_NAME", "test-service-override")
+	logger := NewLogger()
+	if logger == nil {
+		t.Fatal("expected non-nil logger with service name env var")
+	}
+}
+
+// --- gorm_otel before/after callbacks (mock via minimal *gorm.DB) ---
+
+func TestBeforeCallback_NilStatement(t *testing.T) {
+	fn := before("query")
+	fn(&gorm.DB{}) // Statement is nil → early return, must not panic
+}
+
+func TestBeforeCallback_NilContext(t *testing.T) {
+	fn := before("query")
+	fn(&gorm.DB{Statement: &gorm.Statement{}}) // Context is nil → early return
+}
+
+func TestAfterCallback_NilStatement(t *testing.T) {
+	fn := after("query")
+	fn(&gorm.DB{}) // Statement is nil → early return, must not panic
+}
+
+func TestAfterCallback_NoSpanInSettings(t *testing.T) {
+	fn := after("query")
+	fn(&gorm.DB{Statement: &gorm.Statement{}})
+}
+
+func TestBeforeCallback_WithValidContext(t *testing.T) {
+	tracer := otel.Tracer("test")
+	ctx, span := tracer.Start(context.Background(), "test")
+	defer span.End()
+
+	db := &gorm.DB{Statement: &gorm.Statement{Context: ctx}}
+	before("query")(db)
+}
+
+func TestAfterCallback_WithInvalidSpanType(t *testing.T) {
+	db := &gorm.DB{Statement: &gorm.Statement{}}
+	db.InstanceSet(gormSpanKey, "not-a-span")
+	after("query")(db)
+}
+
+func TestAfterCallback_WithSpanButNoStartTime(t *testing.T) {
+	tracer := otel.Tracer("test")
+	ctx, span := tracer.Start(context.Background(), "test")
+	defer span.End()
+
+	db := &gorm.DB{Statement: &gorm.Statement{Context: ctx}}
+	db.InstanceSet(gormSpanKey, span)
+	after("query")(db)
+}
+
+func TestAfterCallback_WithInvalidStartTimeType(t *testing.T) {
+	tracer := otel.Tracer("test")
+	ctx, span := tracer.Start(context.Background(), "test")
+	defer span.End()
+
+	db := &gorm.DB{Statement: &gorm.Statement{Context: ctx}}
+	db.InstanceSet(gormSpanKey, span)
+	db.InstanceSet(gormStartKey, "not-a-time")
+	after("query")(db)
+}
+
+func TestAfterCallback_HappyPath(t *testing.T) {
+	tracer := otel.Tracer("test")
+	ctx, span := tracer.Start(context.Background(), "test")
+	defer span.End()
+
+	db := &gorm.DB{Statement: &gorm.Statement{Context: ctx, Table: "orders"}}
+	db.InstanceSet(gormSpanKey, span)
+	db.InstanceSet(gormStartKey, time.Now())
+	after("query")(db)
+}
+
+func TestAfterCallback_WithError(t *testing.T) {
+	tracer := otel.Tracer("test")
+	ctx, span := tracer.Start(context.Background(), "test")
+	defer span.End()
+
+	db := &gorm.DB{
+		Statement: &gorm.Statement{Context: ctx},
+		Error:     errors.New("db error"),
+	}
+	db.InstanceSet(gormSpanKey, span)
+	db.InstanceSet(gormStartKey, time.Now())
+	after("query")(db)
+}
+
+func TestAfterCallback_RecordNotFoundError(t *testing.T) {
+	tracer := otel.Tracer("test")
+	ctx, span := tracer.Start(context.Background(), "test")
+	defer span.End()
+
+	db := &gorm.DB{
+		Statement: &gorm.Statement{Context: ctx},
+		Error:     gorm.ErrRecordNotFound,
+	}
+	db.InstanceSet(gormSpanKey, span)
+	db.InstanceSet(gormStartKey, time.Now())
+	after("query")(db) // ErrRecordNotFound is skipped — no error recorded on span
+}
+
+func TestAfterCallback_WithLongSQL(t *testing.T) {
+	tracer := otel.Tracer("test")
+	ctx, span := tracer.Start(context.Background(), "test")
+	defer span.End()
+
+	db := &gorm.DB{Statement: &gorm.Statement{Context: ctx}}
+	db.Statement.SQL.WriteString(strings.Repeat("X", maxSQLLen+10))
+	db.InstanceSet(gormSpanKey, span)
+	db.InstanceSet(gormStartKey, time.Now())
+	after("query")(db)
+}
+
+func TestNewLogger_LoggingExercisesReplaceAttr(t *testing.T) {
+	logger := NewLogger()
+	logger.Info("test message", "key", "value")
+	logger.Error("test error")
 }

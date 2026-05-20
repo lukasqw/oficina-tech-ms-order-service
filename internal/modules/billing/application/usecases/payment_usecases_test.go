@@ -525,6 +525,88 @@ func awaitingPaymentOrder(t *testing.T) *service_order.ServiceOrder {
 	return order
 }
 
+// --- CancelPaymentOrder ---
+
+func TestCancelPaymentOrderEmptyIDReturnsNil(t *testing.T) {
+	uc := NewCancelPaymentOrder(&fakeMPClient{})
+	if err := uc.Execute(context.Background(), ""); err != nil {
+		t.Fatalf("expected nil for empty mpOrderID, got %v", err)
+	}
+}
+
+func TestCancelPaymentOrderCallsClient(t *testing.T) {
+	uc := NewCancelPaymentOrder(&fakeMPClient{order: &payment.Order{ID: "order-1", Status: "cancelled"}})
+	if err := uc.Execute(context.Background(), "order-1"); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+// --- RefundPaymentOrder ---
+
+func TestRefundPaymentOrderEmptyIDReturnsNil(t *testing.T) {
+	uc := NewRefundPaymentOrder(&fakeMPClient{})
+	if err := uc.Execute(context.Background(), ""); err != nil {
+		t.Fatalf("expected nil for empty mpOrderID, got %v", err)
+	}
+}
+
+func TestRefundPaymentOrderCallsClient(t *testing.T) {
+	uc := NewRefundPaymentOrder(&fakeMPClient{order: &payment.Order{ID: "order-1", Status: "refunded"}})
+	if err := uc.Execute(context.Background(), "order-1"); err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+}
+
+// --- RetryPayment ---
+
+func TestRetryPaymentSucceeds(t *testing.T) {
+	order := paymentRejectedOrder(t)
+	repo := newMemoryOrderRepo(order)
+	historyRepo := &memoryHistoryRepo{}
+	mpClient := &fakeMPClient{order: &payment.Order{ID: "new-order-1", RedirectURL: "https://pay/new"}}
+	uc := NewRetryPayment(mpClient, repo, historyRepo)
+
+	output, err := uc.Execute(context.Background(), testOrderID)
+	if err != nil {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	if output.PaymentURL != "https://pay/new" || output.MPOrderID != "new-order-1" {
+		t.Fatalf("unexpected output: %+v", output)
+	}
+	if len(historyRepo.saved) != 1 {
+		t.Fatalf("expected 1 history save, got %d", len(historyRepo.saved))
+	}
+}
+
+func TestRetryPaymentFailsWhenNotPaymentRejected(t *testing.T) {
+	repo := newMemoryOrderRepo(awaitingPaymentOrder(t))
+	uc := NewRetryPayment(&fakeMPClient{}, repo, &memoryHistoryRepo{})
+	if _, err := uc.Execute(context.Background(), testOrderID); err != service_order.ErrInvalidStatusTransition {
+		t.Fatalf("expected ErrInvalidStatusTransition, got %v", err)
+	}
+}
+
+func TestRetryPaymentFailsWhenOrderNotFound(t *testing.T) {
+	repo := newMemoryOrderRepo()
+	uc := NewRetryPayment(&fakeMPClient{}, repo, &memoryHistoryRepo{})
+	if _, err := uc.Execute(context.Background(), testOrderID); err == nil {
+		t.Fatal("expected error when order not found")
+	}
+}
+
+func paymentRejectedOrder(t *testing.T) *service_order.ServiceOrder {
+	t.Helper()
+	order, err := service_order.ReconstructServiceOrder(
+		testOrderID, testCustomerID, testVehicleID, "test",
+		service_order.StatusPaymentRejected, service_order.SagaStatusIdle,
+		nil, nil, nil, nil, nil, nil, nil, nil, time.Now(), time.Now(), nil,
+	)
+	if err != nil {
+		t.Fatalf("ReconstructServiceOrder() error = %v", err)
+	}
+	return order
+}
+
 func completedOrder(t *testing.T) *service_order.ServiceOrder {
 	t.Helper()
 	order, err := service_order.ReconstructServiceOrder(
