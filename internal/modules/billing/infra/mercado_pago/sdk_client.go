@@ -1,17 +1,18 @@
 package mercado_pago
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"unicode"
 
 	"github.com/mercadopago/sdk-go/pkg/config"
 	sdkpreference "github.com/mercadopago/sdk-go/pkg/preference"
+	sdkrefund "github.com/mercadopago/sdk-go/pkg/refund"
 
 	"oficina-tech/internal/modules/billing/domain/payment"
 )
@@ -19,10 +20,11 @@ import (
 // SDKClient implementa payment.MercadoPagoClient usando o SDK oficial (Preferences API).
 type SDKClient struct {
 	preferenceClient sdkpreference.Client
+	refundClient     sdkrefund.Client
 	notificationURL  string
 	callbackBaseURL  string
 	accessToken      string
-	apiBaseURL       string // host para chamadas HTTP diretas (get_payment, refund)
+	apiBaseURL       string // host para chamadas HTTP diretas (get_payment)
 	isSandbox        bool   // true when MP_ACCESS_TOKEN starts with "TEST-"
 }
 
@@ -38,6 +40,7 @@ func NewSDKClient(accessToken, notificationURL, callbackBaseURL string, opts ...
 	}
 	return &SDKClient{
 		preferenceClient: sdkpreference.NewClient(cfg),
+		refundClient:     sdkrefund.NewClient(cfg),
 		notificationURL:  notificationURL,
 		callbackBaseURL:  strings.TrimRight(callbackBaseURL, "/"),
 		accessToken:      accessToken,
@@ -145,36 +148,30 @@ func (c *SDKClient) CancelOrder(_ context.Context, mpOrderID string) (*payment.O
 	return &payment.Order{ID: mpOrderID, Status: "cancelled"}, nil
 }
 
-// RefundOrder solicita estorno de um pagamento aprovado via POST /v1/payments/{paymentID}/refunds.
-// O parâmetro deve ser o payment ID (armazenado em MPPaymentID após webhook de confirmação).
+// RefundOrder solicita estorno de um pagamento aprovado via SDK oficial do MP.
+// O parâmetro deve ser o payment ID numérico (armazenado em MPPaymentID após webhook de confirmação).
 func (c *SDKClient) RefundOrder(ctx context.Context, paymentID string, amount *string) (*payment.Order, error) {
 	if paymentID == "" {
 		return &payment.Order{}, nil
 	}
 
-	var bodyBytes []byte
+	pid, err := strconv.Atoi(paymentID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: payment ID inválido %q", payment.ErrOrderNotRefundable, paymentID)
+	}
+
+	var sdkErr error
 	if amount != nil {
-		bodyBytes, _ = json.Marshal(map[string]string{"amount": *amount})
+		amt, parseErr := strconv.ParseFloat(*amount, 64)
+		if parseErr != nil {
+			return nil, fmt.Errorf("%w: amount inválido %q", payment.ErrOrderNotRefundable, *amount)
+		}
+		_, sdkErr = c.refundClient.CreatePartialRefund(ctx, pid, amt)
 	} else {
-		bodyBytes = []byte("{}")
+		_, sdkErr = c.refundClient.Create(ctx, pid)
 	}
-
-	url := c.apiBaseURL + "/v1/payments/" + paymentID + "/refunds"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", payment.ErrOrderNotRefundable, err)
-	}
-	req.Header.Set("Authorization", "Bearer "+c.accessToken)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("%w: %v", payment.ErrOrderNotRefundable, err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("%w: HTTP %d", payment.ErrOrderNotRefundable, resp.StatusCode)
+	if sdkErr != nil {
+		return nil, fmt.Errorf("%w: %v", payment.ErrOrderNotRefundable, sdkErr)
 	}
 
 	return &payment.Order{ID: paymentID, Status: "refunded"}, nil
