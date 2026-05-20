@@ -66,6 +66,8 @@ func (uc *HandlePaymentWebhook) Execute(ctx context.Context, input HandlePayment
 		return uc.markApproved(ctx, orderID, mpPayment.ID)
 	case "rejected", "cancelled", "canceled":
 		return uc.markRejected(ctx, orderID, mpPayment.ID, mpPayment.Status, mpPayment.StatusDetail)
+	case "refunded":
+		return uc.markRefunded(ctx, orderID, mpPayment.ID)
 	case "pending", "in_process":
 		return &HandlePaymentWebhookOutput{Processed: false, Status: mpPayment.Status, OrderID: orderID}, nil
 	default:
@@ -116,6 +118,32 @@ func (uc *HandlePaymentWebhook) markRejected(ctx context.Context, orderID, payme
 		return nil, err
 	}
 	if err := uc.saveHistory(ctx, order, oldStatus, order.Status(), paymentID, paymentStatus, statusDetail); err != nil {
+		return nil, err
+	}
+	if err := uc.orderRepo.Save(ctx, order); err != nil {
+		return nil, err
+	}
+	uc.sendStatusUpdateEmail(ctx, order, oldStatus, order.Status())
+	return &HandlePaymentWebhookOutput{Processed: true, Status: order.Status().String(), OrderID: order.ID()}, nil
+}
+
+func (uc *HandlePaymentWebhook) markRefunded(ctx context.Context, orderID, paymentID string) (*HandlePaymentWebhookOutput, error) {
+	order, err := uc.orderRepo.FindByID(ctx, orderID)
+	if err != nil {
+		return nil, err
+	}
+	if order.Status() == service_order.StatusCanceled {
+		return &HandlePaymentWebhookOutput{Processed: false, Status: order.Status().String(), OrderID: order.ID()}, nil
+	}
+	if order.Status() != service_order.StatusPaid {
+		return &HandlePaymentWebhookOutput{Processed: false, Status: order.Status().String(), OrderID: order.ID()}, nil
+	}
+
+	oldStatus := order.Status()
+	if err := order.CancelAfterRefund(); err != nil {
+		return nil, err
+	}
+	if err := uc.saveHistory(ctx, order, oldStatus, order.Status(), paymentID, "refunded", ""); err != nil {
 		return nil, err
 	}
 	if err := uc.orderRepo.Save(ctx, order); err != nil {
