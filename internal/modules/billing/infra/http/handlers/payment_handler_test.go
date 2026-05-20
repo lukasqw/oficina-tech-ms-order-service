@@ -53,6 +53,85 @@ func TestPaymentHandlerRejectsInvalidUUID(t *testing.T) {
 	}
 }
 
+func TestRetryPaymentHandlerRejectsInvalidUUID(t *testing.T) {
+	handler := NewPaymentHandler(nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/service-orders/bad/retry-payment", nil)
+	req.SetPathValue("id", "bad")
+	rr := httptest.NewRecorder()
+	handler.RetryPayment(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
+func TestRetryPaymentHandlerReturns500WhenNotConfigured(t *testing.T) {
+	handler := NewPaymentHandler(nil, nil)
+	req := httptest.NewRequest(http.MethodPost, "/service-orders/"+handlerOrderID+"/retry-payment", nil)
+	req.SetPathValue("id", handlerOrderID)
+	rr := httptest.NewRecorder()
+	handler.RetryPayment(rr, req)
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d", rr.Code)
+	}
+}
+
+func TestRetryPaymentHandlerPropagatesUsecaseError(t *testing.T) {
+	repo := newHandlerOrderRepo(handlerAwaitingPaymentOrder(t))
+	uc := billingUsecases.NewRetryPayment(&handlerMPClient{}, repo, &handlerHistoryRepo{})
+	handler := NewPaymentHandler(nil, uc)
+	req := httptest.NewRequest(http.MethodPost, "/service-orders/"+handlerOrderID+"/retry-payment", nil)
+	req.SetPathValue("id", handlerOrderID)
+	rr := httptest.NewRecorder()
+	handler.RetryPayment(rr, req)
+	// Order is AWAITING_PAYMENT (not PAYMENT_REJECTED) → ErrInvalidStatusTransition
+	if rr.Code == http.StatusAccepted {
+		t.Fatalf("expected error status, got 202")
+	}
+}
+
+func TestResultHandlerSuccessStatus(t *testing.T) {
+	handler := NewResultHandler()
+	req := httptest.NewRequest(http.MethodGet, "/payments/result?status=success&order=order-1", nil)
+	rr := httptest.NewRecorder()
+	handler.Handle(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+	if ct := rr.Header().Get("Content-Type"); ct != "text/html; charset=utf-8" {
+		t.Fatalf("expected HTML content type, got %s", ct)
+	}
+}
+
+func TestResultHandlerPendingStatus(t *testing.T) {
+	handler := NewResultHandler()
+	req := httptest.NewRequest(http.MethodGet, "/payments/result?status=pending&order=order-2", nil)
+	rr := httptest.NewRecorder()
+	handler.Handle(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+}
+
+func TestResultHandlerFailureStatus(t *testing.T) {
+	handler := NewResultHandler()
+	req := httptest.NewRequest(http.MethodGet, "/payments/result?status=failure&order=order-3", nil)
+	rr := httptest.NewRecorder()
+	handler.Handle(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rr.Code)
+	}
+}
+
+func TestResultHandlerInvalidStatus(t *testing.T) {
+	handler := NewResultHandler()
+	req := httptest.NewRequest(http.MethodGet, "/payments/result?status=unknown", nil)
+	rr := httptest.NewRecorder()
+	handler.Handle(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rr.Code)
+	}
+}
+
 func handlerCompletedOrder(t *testing.T) *service_order.ServiceOrder {
 	t.Helper()
 	order, err := service_order.ReconstructServiceOrder(
