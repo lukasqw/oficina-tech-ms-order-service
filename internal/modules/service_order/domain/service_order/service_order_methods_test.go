@@ -645,6 +645,104 @@ func TestCaptureOrderState(t *testing.T) {
 	}
 }
 
+// --- CancelAfterRefund ---
+
+func TestCancelAfterRefund_FromPaid(t *testing.T) {
+	now := time.Now()
+	so, _ := ReconstructServiceOrder("id", "cust-1", "veh-1", "d", StatusPaid, SagaStatusIdle, nil, nil, nil, nil, nil, nil, nil, nil, now, now, nil)
+	if err := so.CancelAfterRefund(); err != nil {
+		t.Fatalf("CancelAfterRefund() error = %v", err)
+	}
+	if so.Status() != StatusCanceled {
+		t.Errorf("expected CANCELED, got %s", so.Status())
+	}
+}
+
+func TestCancelAfterRefund_InvalidStatus(t *testing.T) {
+	so, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	if err := so.CancelAfterRefund(); err != ErrInvalidStatusTransition {
+		t.Fatalf("expected ErrInvalidStatusTransition, got %v", err)
+	}
+}
+
+// --- SetCustomerSnapshot / CustomerEmail / CustomerName ---
+
+func TestSetCustomerSnapshot(t *testing.T) {
+	so, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	so.SetCustomerSnapshot("test@example.com", "John Doe")
+	if so.CustomerEmail() != "test@example.com" {
+		t.Errorf("expected test@example.com, got %s", so.CustomerEmail())
+	}
+	if so.CustomerName() != "John Doe" {
+		t.Errorf("expected John Doe, got %s", so.CustomerName())
+	}
+}
+
+// --- BuildHistoryMetadataWithItems / hasItemsChanged / filterActiveItems / buildItemSignature ---
+
+func TestBuildHistoryMetadataWithItems_ItemsAdded(t *testing.T) {
+	old, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	newOrder, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	item, _ := NewServiceOrderItem("", ItemTypeService, "ref-1", "Oil Change", 1, 10000)
+	_ = item.SetID("item-1")
+	_ = newOrder.AddItem(item)
+	changes := BuildHistoryMetadataWithItems(old, newOrder)
+	if _, ok := changes["items_changed"]; !ok {
+		t.Fatalf("expected items_changed in metadata when items differ")
+	}
+}
+
+func TestBuildHistoryMetadataWithItems_NoChange(t *testing.T) {
+	so, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	changes := BuildHistoryMetadataWithItems(so, so)
+	if _, ok := changes["items_changed"]; ok {
+		t.Fatalf("unexpected items_changed when nothing changed")
+	}
+}
+
+func TestBuildHistoryMetadataWithItems_SameContent(t *testing.T) {
+	old, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	item1, _ := NewServiceOrderItem("", ItemTypeProduct, "ref-1", "Item A", 2, 50)
+	_ = item1.SetID("item-1")
+	_ = old.AddItem(item1)
+
+	newOrder, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	item2, _ := NewServiceOrderItem("", ItemTypeProduct, "ref-1", "Item A", 2, 50)
+	_ = item2.SetID("item-2")
+	_ = newOrder.AddItem(item2)
+
+	changes := BuildHistoryMetadataWithItems(old, newOrder)
+	if _, ok := changes["items_changed"]; ok {
+		t.Fatalf("unexpected items_changed when item content is the same")
+	}
+}
+
+func TestBuildHistoryMetadataWithItems_DifferentCount(t *testing.T) {
+	old, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	item1, _ := NewServiceOrderItem("", ItemTypeProduct, "ref-1", "Item A", 2, 50)
+	_ = item1.SetID("item-1")
+	_ = old.AddItem(item1)
+
+	newOrder, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	changes := BuildHistoryMetadataWithItems(old, newOrder)
+	if _, ok := changes["items_changed"]; !ok {
+		t.Fatalf("expected items_changed when item count differs")
+	}
+}
+
+func TestBuildHistoryMetadataWithItems_DeletedItemsExcluded(t *testing.T) {
+	order, _ := NewServiceOrder("cust-1", "veh-1", "desc")
+	item1, _ := NewServiceOrderItem("", ItemTypeProduct, "ref-1", "Item A", 1, 50)
+	_ = item1.SetID("item-1")
+	_ = order.AddItem(item1)
+	_ = order.RemoveItem("item-1")
+
+	changes := BuildHistoryMetadataWithItems(order, order)
+	if _, ok := changes["items_changed"]; ok {
+		t.Fatalf("deleted items should be excluded from comparison")
+	}
+}
+
 func TestCaptureOrderState_NoItems(t *testing.T) {
 	now := time.Now()
 	so, _ := ReconstructServiceOrder(

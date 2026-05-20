@@ -201,6 +201,24 @@ func TestHandleMessage_OrderAwaitingInventory_Skipped(t *testing.T) {
 	}
 }
 
+// --- Start function tests ---
+
+func TestCustomerDeletedConsumerStart_CancelledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	consumer := NewCustomerDeletedConsumer(&fakeSQSClient{}, "q", &customerDeletedMockRepo{}, nil)
+	if err := consumer.Start(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", err)
+	}
+}
+
+func TestCustomerDeletedConsumerStart_ReceiveError(t *testing.T) {
+	consumer := NewCustomerDeletedConsumer(&errorSQSClient{receiveErr: errors.New("net error")}, "q", &customerDeletedMockRepo{}, nil)
+	if err := consumer.Start(context.Background()); err == nil {
+		t.Fatal("expected error from ReceiveMessage failure")
+	}
+}
+
 // TestHandleMessage_NoReceiptHandle: valid event, no orders, but no receipt handle → error.
 func TestHandleMessage_NoReceiptHandle(t *testing.T) {
 	client := &fakeSQSClient{}

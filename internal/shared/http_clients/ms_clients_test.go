@@ -102,6 +102,100 @@ func TestMS1ClientGetVehicleByID_Success(t *testing.T) {
 	}
 }
 
+func TestGetCustomerByIDReturnsErrorOnNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	_, err := NewMS1ClientWithBaseURL(server.URL).GetCustomerByID(context.Background(), "bad-id")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGetProductByIDReturnsErrorOnNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	_, err := NewMS3ClientWithBaseURL(server.URL).GetProductByID(context.Background(), "bad-id")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestGetServiceByIDReturnsErrorOnNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	_, err := NewMS3ClientWithBaseURL(server.URL).GetServiceByID(context.Background(), "bad-id")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
+func TestDoGetMaps401ToUnauthorized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+	}))
+	defer server.Close()
+
+	_, err := NewMS1ClientWithBaseURL(server.URL).GetCustomerByID(context.Background(), "id-1")
+	if !errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected ErrUnauthorized, got %v", err)
+	}
+}
+
+func TestDoGetMapsUnexpectedStatusToGenericError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	}))
+	defer server.Close()
+
+	_, err := NewMS1ClientWithBaseURL(server.URL).GetCustomerByID(context.Background(), "id-1")
+	if err == nil || errors.Is(err, ErrNotFound) || errors.Is(err, ErrUnauthorized) {
+		t.Fatalf("expected generic upstream error, got %v", err)
+	}
+}
+
+func TestDoGetFallsBackToDirectJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"customer-1","name":"Direct","email":"d@e.com"}`))
+	}))
+	defer server.Close()
+
+	customer, err := NewMS1ClientWithBaseURL(server.URL).GetCustomerByID(context.Background(), "customer-1")
+	if err != nil {
+		t.Fatalf("expected no error for direct JSON, got %v", err)
+	}
+	if customer.Name != "Direct" {
+		t.Fatalf("expected name 'Direct', got %s", customer.Name)
+	}
+}
+
+func TestDoGetContextCancelledDuringRetry(t *testing.T) {
+	attempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	// Cancel immediately after first attempt starts
+	go func() { cancel() }()
+
+	_, err := NewMS1ClientWithBaseURL(server.URL).GetCustomerByID(ctx, "id-1")
+	if err == nil {
+		t.Fatal("expected error from cancelled context or retryable error")
+	}
+}
+
 func TestMS3ClientRetries5xx(t *testing.T) {
 	attempts := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

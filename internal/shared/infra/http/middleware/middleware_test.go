@@ -202,6 +202,45 @@ func TestRequireOwnerOrRole_InsufficientRoleAndNotOwner(t *testing.T) {
 	}
 }
 
+func TestRequireOwnerOrRole_NoRoleInContext(t *testing.T) {
+	m := NewRBACMiddleware()
+	req := httptest.NewRequest(http.MethodGet, "/resource/123", nil)
+	ctx := context.WithValue(req.Context(), UserIDKey, "some-user-id")
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	m.RequireOwnerOrRole(RoleAdmin)(http.HandlerFunc(okHandler)).ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("want 403, got %d", rec.Code)
+	}
+}
+
+func TestRequireOwnerOrRole_OwnerMatchesUUIDInPath(t *testing.T) {
+	ownerID := "11111111-1111-4111-8111-111111111111"
+	m := NewRBACMiddleware()
+	req := httptest.NewRequest(http.MethodGet, "/resource/"+ownerID, nil)
+	ctx := context.WithValue(req.Context(), UserIDKey, ownerID)
+	ctx = context.WithValue(ctx, UserRoleKey, RoleCustomer)
+	req = req.WithContext(ctx)
+	rec := httptest.NewRecorder()
+	m.RequireOwnerOrRole(RoleAdmin)(http.HandlerFunc(okHandler)).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("want 200 (owner match), got %d", rec.Code)
+	}
+}
+
+func TestHasRequiredRole_UnknownAllowedRole(t *testing.T) {
+	if hasRequiredRole(RoleAdmin, []string{"UNKNOWN_ROLE"}) {
+		t.Error("expected false when allowedRole is not in roleHierarchy")
+	}
+}
+
+func TestExtractResourceID_NoUUID(t *testing.T) {
+	id := extractResourceID("/users/not-a-uuid")
+	if id != "" {
+		t.Errorf("expected empty string for non-UUID path segment, got %q", id)
+	}
+}
+
 // --- WrapMux / NewObservabilityMiddleware ---
 
 func TestWrapMux_MatchedRoute_Returns200(t *testing.T) {
