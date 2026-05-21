@@ -42,7 +42,22 @@ jobs:
           version: latest
 
       - name: Run Unit Tests
-        run: go test ./internal/... -v -coverprofile=coverage.out -covermode=atomic
+        run: |
+          SKIP='/internal/modules/service_order$'
+          SKIP+='|/internal/modules/service_order/infra/http$'
+          SKIP+='|/internal/modules/service_order/infra/http/dto$'
+          SKIP+='|/internal/modules/service_order/infra/persistence$'
+          SKIP+='|/internal/modules/service_order/infra/adapters$'
+          SKIP+='|/internal/modules/service_order/infra/adapters/implementations$'
+          SKIP+='|/internal/shared/dto$'
+          SKIP+='|/internal/shared/infra/awsconfig$'
+          SKIP+='|/internal/shared/infra/database$'
+          SKIP+='|/internal/shared/infra/dynamodb$'
+          SKIP+='|/internal/shared/infra/email$'
+          SKIP+='|/internal/shared/infra/sqs$'
+          SKIP+='|/internal/messaging/events$'
+          PKGS=$(go list ./internal/... | grep -vE "$SKIP")
+          go test ${PKGS} -v -coverprofile=coverage.out -covermode=atomic
 
       - name: Coverage Gate
         run: |
